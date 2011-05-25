@@ -1,0 +1,84 @@
+#!/usr/bin/perl
+# Copyright (c) 2009 Jiri Slaby <jirislaby@gmail.com>
+#
+# Distributed under GPLv2
+#
+# This script accepts parameters in the following format:
+# {source},{output},{working directory},{cpp flags}
+#
+# preprocessed file can be found at output.preproc
+# types from typedefs might be found on standard output
+
+use strict;
+use warnings;
+use File::Basename qw(dirname);
+
+my @kinstrument = (
+	"mutex_lock", "mutex_trylock", "mutex_lock_interruptible",
+	"mutex_lock_killable", "mutex_lock_nested",
+	"mutex_lock_interruptible_nested", "mutex_lock_killable_nested",
+	"mutex_unlock",
+	"lock_kernel", "unlock_kernel",
+	"rcu_read_lock", "rcu_read_unlock", "rcu_assign_pointer",
+	"spin_lock", "spin_trylock", "spin_lock_nested", "spin_unlock",
+	"spin_lock_bh", "spin_unlock_bh",
+	"spin_lock_irq", "spin_trylock_irq", "spin_lock_irq_nested",
+		"spin_unlock_irq",
+	"spin_lock_irqsave", "spin_trylock_irqsave", "spin_lock_irqsave_nested",
+		"spin_unlock_irqrestore",
+	"read_lock", "read_unlock", "read_lock_bh", "read_unlock_bh",
+	"read_lock_irq", "read_unlock_irq",
+	"read_lock_irqsave", "read_unlock_irqrestore",
+	"write_lock", "write_unlock", "write_lock_bh", "write_unlock_bh",
+	"write_lock_irq", "write_unlock_irq",
+	"write_lock_irqsave", "write_unlock_irqrestore",
+	"wait_event_lock_irq",
+	"local_irq_save", "local_irq_restore",
+	"local_irq_disable", "local_irq_enable",
+	"preempt_disable", "preempt_enable",
+	"likely", "unlikely",
+	"put_user", "get_user",
+	"put_cpu", "get_cpu",
+	"memcpy", "memset",
+	"BUG", "BUG_ON",
+	"GFP_KERNEL",
+
+	"assert"
+);
+
+die "wrong commandline" if @ARGV != 1;
+
+my $arg = shift @ARGV;
+chomp $arg;
+$arg =~ /^{(.*)},{(.*)},{(.*)},{(.*)}$/;
+
+die "commandline mangled" unless defined $4;
+
+my $source = $1;
+my $output = $2;
+chdir $3 if length $3 > 0;
+my $flags = $4;
+
+my $preproc = $output . ".preproc";
+my $sourcedir = dirname $source;
+
+my $cc = ($ENV{'CROSS_COMPILE'} || ""). "gcc";
+my $cppflags = $ENV{'STANSE_CPPFLAGS'} || "";
+my $cpp = "$cc -E -w $cppflags -I$sourcedir " .
+	"-D__st_unlikely_st__\\(x\\)=x -D__st_likely_st__\\(x\\)=x $flags";
+open(CPP, "|$cpp -o $preproc -") || die "can't exec '$cpp -o $preproc'";
+
+open(SRC, "$source") || die "can't open '$source'";
+{
+	local $/;
+	my $file = <SRC>;
+	for (@kinstrument) {
+		$file =~ s/\b$_\b/__st_${_}_st__/g;
+	}
+	print CPP $file;
+}
+close(SRC);
+
+close(CPP);
+
+exit 0;
