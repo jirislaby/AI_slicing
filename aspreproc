@@ -50,12 +50,26 @@ my @kinstrumentval = (
 );
 
 sub create_re(@) {
-	return '#\s*define\s\b(' . join("|", @_) .
-		')\b\s*\(([^\)]*)\)(([^\n\\\\]*(\\\\.)?)*)\n';
+	my $str =
+# define + macro name + whitespace
+		'#\s*define\s\b(' . join("|", @_) . ')\b\s*' .
+# parameters
+		'\(([^\)]*)\)\s*' .
+# the definiton till the end of the line (multiline parsing with '\' at EOL)
+		'(([^\n\\\\]*(\\\\.)?)*)' .
+# the final EOL
+		'\n';
+	return qr/$str/;
 }
 
 my $re = create_re(@kinstrument);
 my $reval = create_re(@kinstrumentval);
+
+sub do_replace($$$$$$) {
+	my ($l, $m, $r, $fun, $param, $def) = @_;
+	my $sparam = (length $param > 0) ? ", $param" : "";
+	return qq/#define $fun($param) $l __ai_start("$fun"$sparam); $m $def; __ai_stop("$fun"$sparam); $r\n/;
+}
 
 sub do_file($) {
 	local $/;
@@ -64,15 +78,16 @@ sub do_file($) {
 	my $file = <SRC>;
 	seek(SRC, 0, 0) || die "cannot seek '$source'";
 	truncate(SRC, 0) || die "cannot truncate '$source'";
-	$file =~ s/$re/#define $1($2) do { __ai_start("$1", $2); $3; __ai_stop("$1", $2); } while (0)\n/gs;
-	$file =~ s/$reval/#define $1($2) ({ int __rval; __ai_start("$1", $2); rval = $3; __ai_stop("$1", $2); __rval; })\n/gs;
+	$file =~ s/$re/do_replace('do {', '', '} while (0)', $1, $2, $3)/gse;
+# typeof insted of long?
+	$file =~ s/$reval/do_replace('({ long __rval;', 'rval =', '__rval; })', $1, $2, $3)/gse;
 	print SRC "#ifndef __AI_FUNCTIONS\n";
 	print SRC "#define __AI_FUNCTIONS\n";
 	print SRC "extern const char *__ai_checker_str;\n";
 	print SRC "extern void __ai_start(const char *str, ...) { __ai_checker_str = str; }\n";
 	print SRC "extern void __ai_stop(const char *str, ...) { __ai_checker_str = str; }\n";
 	print SRC "#endif\n";
-	print $file;
+	print SRC $file;
 	close(SRC);
 }
 
