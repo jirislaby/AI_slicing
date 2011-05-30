@@ -3,11 +3,10 @@
 #
 # Distributed under GPLv2
 #
-# This script accepts parameters in the following format:
-# {source},{output},{working directory},{cpp flags}
+# This script accepts file list as parameters.
 #
-# preprocessed file can be found at output.preproc
-# types from typedefs might be found on standard output
+# It is intended to instrument the Linux Kernel so that we won't loose
+# information about important functions.
 
 use strict;
 use warnings;
@@ -58,21 +57,21 @@ sub create_re(@) {
 my $re = create_re(@kinstrument);
 my $reval = create_re(@kinstrumentval);
 
-print STDERR "RE: $re\n";
-print STDERR "REVAS: $reval\n";
-
 sub do_file($) {
 	local $/;
 	my $source = shift;
 	open(SRC, "+<$source") || die "can't open '$source'";
 	my $file = <SRC>;
-#	seek(SRC, 0, 0) || die "cannot seek '$source'";
-#	truncate(SRC, 0) || die "cannot truncate '$source'";
-	$file =~ s/$re/#define $1($2) do { start("$1" # $2); $3; stop("$1" # $2); } while (0)\n/gs;
-	$file =~ s/$reval/#define $1($2) ({ int __rval; start("$1" # $2); rval = $3; stop("$1" # $2); __rval; })\n/gs;
-	print "const char *__checker_str;\n";
-	print "static void start(const char *str) { __checker_str = str; }\n";
-	print "static void stop(const char *str) { __checker_str = str; }\n";
+	seek(SRC, 0, 0) || die "cannot seek '$source'";
+	truncate(SRC, 0) || die "cannot truncate '$source'";
+	$file =~ s/$re/#define $1($2) do { __ai_start("$1", $2); $3; __ai_stop("$1", $2); } while (0)\n/gs;
+	$file =~ s/$reval/#define $1($2) ({ int __rval; __ai_start("$1", $2); rval = $3; __ai_stop("$1", $2); __rval; })\n/gs;
+	print SRC "#ifndef __AI_FUNCTIONS\n";
+	print SRC "#define __AI_FUNCTIONS\n";
+	print SRC "extern const char *__ai_checker_str;\n";
+	print SRC "extern void __ai_start(const char *str, ...) { __ai_checker_str = str; }\n";
+	print SRC "extern void __ai_stop(const char *str, ...) { __ai_checker_str = str; }\n";
+	print SRC "#endif\n";
 	print $file;
 	close(SRC);
 }
