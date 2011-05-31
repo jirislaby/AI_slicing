@@ -31,8 +31,8 @@ my @kinstrument = (
 	"local_irq_disable", "local_irq_enable",
 	"preempt_disable", "preempt_enable",
 	"wait_event_lock_irq",
-	"get_cpu",
 	"memcpy", "memset",
+	"put_cpu",
 
 	"assert"
 );
@@ -44,7 +44,7 @@ my @kinstrumentval = (
 	"rcu_assign_pointer",
 
 	"put_user", "get_user",
-	"put_cpu"
+	"get_cpu"
 #	"BUG", "BUG_ON",
 #	"GFP_KERNEL",
 );
@@ -65,10 +65,10 @@ sub create_re(@) {
 my $re = create_re(@kinstrument);
 my $reval = create_re(@kinstrumentval);
 
-sub do_replace($$$$$$) {
-	my ($l, $m, $r, $fun, $param, $def) = @_;
+sub do_replace($$$$$) {
+	my ($l, $r, $fun, $param, $def) = @_;
 	my $sparam = (length $param > 0) ? ", $param" : "";
-	return qq/#define $fun($param) $l __ai_start("$fun"$sparam); $m $def; __ai_stop("$fun"$sparam); $r\n/;
+	return qq/#define $fun($param) $l __ai_start("$fun"$sparam); $def; $r\n/;
 }
 
 sub do_file($) {
@@ -78,14 +78,13 @@ sub do_file($) {
 	my $file = <SRC>;
 	seek(SRC, 0, 0) || die "cannot seek '$source'";
 	truncate(SRC, 0) || die "cannot truncate '$source'";
-	$file =~ s/$re/do_replace('do {', '', '} while (0)', $1, $2, $3)/gse;
+	$file =~ s/$re/do_replace('do {', '} while (0)', $1, $2, $3)/gse;
 # typeof insted of long?
-	$file =~ s/$reval/do_replace('({ long __rval;', 'rval =', '__rval; })', $1, $2, $3)/gse;
+	$file =~ s/$reval/do_replace('({', '})', $1, $2, $3)/gse;
 	print SRC "#ifndef __AI_FUNCTIONS\n";
 	print SRC "#define __AI_FUNCTIONS\n";
 	print SRC "extern const char *__ai_checker_str;\n";
 	print SRC "extern void __ai_start(const char *str, ...) { __ai_checker_str = str; }\n";
-	print SRC "extern void __ai_stop(const char *str, ...) { __ai_checker_str = str; }\n";
 	print SRC "#endif\n";
 	print SRC $file;
 	close(SRC);
