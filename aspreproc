@@ -31,9 +31,9 @@ my @kinstrument = (
 	"local_irq_disable", "local_irq_enable",
 	"preempt_disable", "preempt_enable",
 	"wait_event_lock_irq",
-	"memcpy", "memset",
 	"put_cpu",
 
+	"BUG", "BUG_ON",
 	"assert"
 );
 my @kinstrumentval = (
@@ -42,24 +42,24 @@ my @kinstrumentval = (
 	"spin_trylock",
 	"lock_kernel", "unlock_kernel",
 	"rcu_assign_pointer",
-
 	"put_user", "get_user",
-	"get_cpu"
-#	"BUG", "BUG_ON",
+	"get_cpu",
+	"memcpy", "memset",
+	"WARN", "WARN_ON", "WARN_ONCE"
 #	"GFP_KERNEL",
 );
 
 sub create_re(@) {
 	my $str =
 # define + macro name + whitespace
-		'#\s*define\s\b(' . join("|", @_) . ')\b\s*' .
-# parameters
+		'#\s*define\s+\b(' . join("|", @_) . ')\b\s*' .
+# parameters + whitespace
 		'\(([^\)]*)\)\s*' .
 # the definiton till the end of the line (multiline parsing with '\' at EOL)
 		'(([^\n\\\\]*(\\\\.)?)*)' .
 # the final EOL
 		'\n';
-	return qr/$str/;
+	return qr/$str/s;
 }
 
 my $re = create_re(@kinstrument);
@@ -67,7 +67,7 @@ my $reval = create_re(@kinstrumentval);
 
 sub do_replace($$$$$) {
 	my ($l, $r, $fun, $param, $def) = @_;
-	my $sparam = (length $param > 0) ? ", $param" : "";
+	my $sparam = ($param =~ /\S/) ? ", $param" : "";
 	return qq/#define $fun($param) $l __ai_start("$fun"$sparam); $def; $r\n/;
 }
 
@@ -76,17 +76,18 @@ sub do_file($) {
 	my $source = shift;
 	open(SRC, "+<$source") || die "can't open '$source'";
 	my $file = <SRC>;
-	seek(SRC, 0, 0) || die "cannot seek '$source'";
-	truncate(SRC, 0) || die "cannot truncate '$source'";
-	$file =~ s/$re/do_replace('do {', '} while (0)', $1, $2, $3)/gse;
-# typeof insted of long?
-	$file =~ s/$reval/do_replace('({', '})', $1, $2, $3)/gse;
-	print SRC "#ifndef __AI_FUNCTIONS\n";
-	print SRC "#define __AI_FUNCTIONS\n";
-	print SRC "extern const char *__ai_checker_str;\n";
-	print SRC "extern void __ai_start(const char *str, ...) { __ai_checker_str = str; }\n";
-	print SRC "#endif\n";
-	print SRC $file;
+	my $changed = $file =~ s/$re/do_replace('do {', '} while (0)', $1, $2, $3)/ge;
+	$changed |= $file =~ s/$reval/do_replace('({', '})', $1, $2, $3)/ge;
+	if ($changed) {
+		seek(SRC, 0, 0) || die "cannot seek '$source'";
+		truncate(SRC, 0) || die "cannot truncate '$source'";
+		print SRC "#ifndef __AI_FUNCTIONS\n";
+		print SRC "#define __AI_FUNCTIONS\n";
+		print SRC "extern const char *__ai_checker_str;\n";
+		print SRC "extern void __ai_start(const char *str, ...) { __ai_checker_str = str; }\n";
+		print SRC "#endif\n";
+		print SRC $file;
+	}
 	close(SRC);
 }
 
