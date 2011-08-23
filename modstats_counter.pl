@@ -15,16 +15,18 @@ while (<>) {
 	my ($file, $ins, $fun, $asm, $call, $lock, $loop, $safe, $safel) =
 	   ($1,    $2,   $3,   $4,   $5,    $6,    $7,    $8,    $9);
 	if ($file =~ /\.sliced$/) {
-		print "for $ofile:\n";
-		print "  fun: $ofun/$fun\n";
-		print "    with asm: $oasm/$asm\n";
-		print "    with call: $ocall/$call\n";
-		print "    with lock: $olock/$lock\n";
-		print "    with loop: $oloop/$loop\n";
-		print "    safe: $osafe/$safe\n";
-		print "    safe w/o loop: $osafel/$safel\n";
+		if ($ofun) {
+			print "for $ofile:\n";
+			print "  fun: $ofun/$fun\n";
+			print "    with asm: $oasm/$asm\n";
+			print "    with call: $ocall/$call\n";
+			print "    with lock: $olock/$lock\n";
+			print "    with loop: $oloop/$loop\n";
+			print "    safe: $osafe/$safe\n";
+			print "    safe w/o loop: $osafel/$safel\n";
+		}
 		$sumfile++;
-		$sumfun += $fun;
+		$sumfun += $ofun;
 		$sumins1 += $oins;
 		$sumins2 += $ins;
 		$sumasm1 += $oasm;
