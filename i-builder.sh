@@ -22,4 +22,4 @@ chmod u+x "$BLD_SCRIPT"
 
 find . -type f -name '*.c' -exec "$BLD_SCRIPT" {} +
 
-#rm -f "$BLD_SCRIPT"
+rm -f "$BLD_SCRIPT"
