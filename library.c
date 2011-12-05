@@ -492,3 +492,8 @@ int printk(const char *s, ...)
 {
 	return 0;
 }
+
+void __assert_fail(const char *__assertion, const char *__file,
+		unsigned int __line, const char *__function)
+{
+}
