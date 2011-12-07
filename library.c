@@ -3,9 +3,13 @@
 #define NULL	(void *)0
 
 #define BITS_PER_LONG	64 /* TODO */
+#define HZ		250
+
+#define EINVAL		22
 
 #define BIT_MASK(nr)	(1UL << ((nr) % BITS_PER_LONG))
 #define BIT_WORD(nr)	((nr) / BITS_PER_LONG)
+#define BITOP_WORD(nr)	((nr) / BITS_PER_LONG)
 
 typedef unsigned short __u16;
 typedef unsigned int __u32;
@@ -22,20 +26,6 @@ int param_get_int() {return 0;}
 short param_get_short() {return 0;}
 void param_set_int() {}
 void param_set_short() {}
-
-unsigned long long simple_strtoull(const char *cp, char **endp,
-		unsigned int base)
-{
-	/* TODO */
-	if (endp)
-		*endp = (char *)cp;
-	return 0;
-}
-
-unsigned long simple_strtoul(const char *cp, char **endp, unsigned int base)
-{
-	return simple_strtoull(cp, endp, base);
-}
 
 int memcmp(const void *cs, const void *ct, size_t count)
 {
@@ -78,6 +68,18 @@ int strcmp(const char *cs, const char *ct)
 	return __res;
 }
 
+int strncmp(const char *cs, const char *ct, size_t count)
+{
+	signed char __res = 0;
+
+	while (count) {
+		if ((__res = *cs - *ct++) != 0 || !*cs++)
+			break;
+		count--;
+	}
+	return __res;
+}
+
 char *strchr(const char *s, int c)
 {
 	for (; *s != (char)c; ++s)
@@ -95,6 +97,19 @@ char *strcpy(char *dest, const char *src)
 	return tmp;
 }
 
+char *strncpy(char *dest, const char *src, size_t count)
+{
+	char *tmp = dest;
+
+	while (count) {
+		if ((*tmp = *src) != 0)
+			src++;
+		tmp++;
+		count--;
+	}
+	return dest;
+}
+
 size_t strlcpy(char *dest, const char *src, size_t size)
 {
 	size_t ret = strlen(src);
@@ -105,6 +120,52 @@ size_t strlcpy(char *dest, const char *src, size_t size)
 		dest[len] = '\0';
 	}
 	return ret;
+}
+
+char *strcat(char *dest, const char *src)
+{
+	char *tmp = dest;
+
+	while (*dest)
+		dest++;
+	while ((*dest++ = *src++) != '\0')
+		;
+	return tmp;
+}
+
+unsigned long long simple_strtoull(const char *cp, char **endp,
+		unsigned int base)
+{
+	/* TODO */
+	if (endp)
+		*endp = (char *)cp;
+	return 0;
+}
+
+unsigned long simple_strtoul(const char *cp, char **endp, unsigned int base)
+{
+	return simple_strtoull(cp, endp, base);
+}
+
+int strict_strtoul(const char *cp, unsigned int base, unsigned long *res)
+{
+	char *tail;
+	unsigned long val;
+	size_t len;
+
+	*res = 0;
+	len = strlen(cp);
+	if (len == 0)
+		return -EINVAL;
+
+	val = simple_strtoul(cp, &tail, base);
+	if ((*tail == '\0') ||
+		((len == (size_t)(tail - cp) + 1) && (*tail == '\n'))) {
+		*res = val;
+		return 0;
+	}
+
+	return -EINVAL;
 }
 
 struct mutex;
@@ -463,6 +524,45 @@ unsigned long ffz(unsigned long word)
 	return __ffs(~word);
 }
 
+unsigned long find_next_bit(const unsigned long *addr, unsigned long size,
+			    unsigned long offset)
+{
+	const unsigned long *p = addr + BITOP_WORD(offset);
+	unsigned long result = offset & ~(BITS_PER_LONG-1);
+	unsigned long tmp;
+
+	if (offset >= size)
+		return size;
+	size -= result;
+	offset %= BITS_PER_LONG;
+	if (offset) {
+		tmp = *(p++);
+		tmp &= (~0UL << offset);
+		if (size < BITS_PER_LONG)
+			goto found_first;
+		if (tmp)
+			goto found_middle;
+		size -= BITS_PER_LONG;
+		result += BITS_PER_LONG;
+	}
+	while (size & ~(BITS_PER_LONG-1)) {
+		if ((tmp = *(p++)))
+			goto found_middle;
+		result += BITS_PER_LONG;
+		size -= BITS_PER_LONG;
+	}
+	if (!size)
+		return result;
+	tmp = *p;
+
+found_first:
+	tmp &= (~0UL >> (BITS_PER_LONG - size));
+	if (tmp == 0UL)	 /* Are any bits set? */
+		return result + size;   /* Nope. */
+found_middle:
+	return result + __ffs(tmp);
+}
+
 unsigned long copy_to_user(void *to, const void *from, unsigned len)
 {
 	memcpy(to, from, len);
@@ -481,6 +581,21 @@ const char *dev_driver_string(const struct device *dev)
 	return "";
 }
 
+int capable(int cap)
+{
+	return 1;
+}
+
+unsigned long msecs_to_jiffies(const unsigned int m)
+{
+	return (m + (1000 / HZ) - 1) / (1000 / HZ);
+}
+
+unsigned int jiffies_to_msecs(const unsigned long j)
+{
+	return (1000 / HZ) * j;
+}
+
 void lock_kernel(void) { }
 void unlock_kernel(void) { }
 
@@ -488,12 +603,44 @@ static char current_data[16 * 1024];
 struct task_struct;
 struct task_struct *__ai_current_singleton = (struct task_struct *)current_data;
 
-int printk(const char *s, ...)
+int __dynamic_dbg_enabled_helper(char *modname, int type, int value, int hash)
 {
 	return 0;
+}
+
+int sprintf(char *buf, const char *fmt, ...)
+{
+	buf[0] = 'A';
+	buf[1] = 0;
+	return 1;
+}
+
+int snprintf(char *buf, size_t size, const char *fmt, ...)
+{
+	return sprintf(buf, "A");
+}
+
+int scnprintf(char *buf, size_t size, const char *fmt, ...)
+{
+	return sprintf(buf, "A");
+}
+
+int xfs_error_trap(int e)
+{
+	return e;
 }
 
 void __assert_fail(const char *__assertion, const char *__file,
 		unsigned int __line, const char *__function)
 {
+}
+
+void assfail(char *expr, char *file, int line)
+{
+	__assert_fail(expr, file, line, "unknown");
+}
+
+void panic(const char *fmt, ...)
+{
+	__assert_fail(fmt, "unknown", 0, "unknown");
 }
