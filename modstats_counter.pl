@@ -7,10 +7,12 @@ my $qr = qr/^\s*machine code:\s*(\S+)\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)\s+([0-9]+
 my ($ofile, $oins, $ofun, $oasm, $onasm, $oecall, $onecall, $olock, $onlock);
 my ($oloop, $onloop, $osafe, $osafel);
 
-my ($sumfile, $sumfun, $sumins1, $sumins2, $sumasm1, $sumasm2);
-my ($sumnasm1, $sumnasm2, $sumecall1, $sumecall2, $sumnecall1, $sumnecall2);
-my ($sumlock1, $sumlock2, $sumnlock1, $sumnlock2, $sumloop1, $sumloop2);
-my ($sumnloop1, $sumnloop2, $sumsafe1, $sumsafe2, $sumsafel1, $sumsafel2);
+my ($sumfile, $sumfun, $sumins1, $sumins2) = (0, 0, 0, 0);
+my ($sumasm1, $sumasm2, $sumnasm1, $sumnasm2) = (0, 0, 0, 0);
+my ($sumecall1, $sumecall2, $sumnecall1, $sumnecall2) = (0, 0, 0, 0);
+my ($sumlock1, $sumlock2, $sumnlock1, $sumnlock2) = (0, 0, 0, 0);
+my ($sumloop1, $sumloop2, $sumnloop1, $sumnloop2) = (0, 0, 0, 0);
+my ($sumsafe1, $sumsafe2, $sumsafel1, $sumsafel2) = (0, 0, 0, 0);
 
 while (<>) {
 	next unless (/$qr/);
@@ -71,21 +73,23 @@ sub stats($$$$) {
 	       100*$sum1/$sum, 100*$sum2/$sum;
 }
 
-print "\n\n\n";
-print "files: $sumfile\n";
-printf "instructions: $sumins1 / $sumins2 (%.2f%% is gone)\n",
-       100-100*$sumins2/$sumins1;
-print "functions: $sumfun\n";
-print "  WHAT: before slicing / after slicing\n";
-stats("  with asm", $sumasm1, $sumasm2, $sumfun);
-stats("    incl nested", $sumnasm1, $sumnasm2, $sumfun);
-stats("  with ext call", $sumecall1, $sumecall2, $sumfun);
-stats("    incl nested", $sumnecall1, $sumnecall2, $sumfun);
-stats("  with lock", $sumlock1, $sumlock2, $sumfun);
-stats("    incl nested", $sumnlock1, $sumnlock2, $sumfun);
-stats("  with loop", $sumloop1, $sumloop2, $sumfun);
-stats("    incl nested", $sumnloop1, $sumnloop2, $sumfun);
-stats("  w/o asm+call", $sumsafe1, $sumsafe2, $sumfun);
-stats("  w/o asm+call+loop", $sumsafel1, $sumsafel2, $sumfun);
+if ($sumins1) {
+	print "\n\n\n";
+	print "files: $sumfile\n";
+	printf "instructions: $sumins1 / $sumins2 (%.2f%% is gone)\n",
+	       100-100*$sumins2/$sumins1;
+	print "functions: $sumfun\n";
+	print "  WHAT: before slicing / after slicing\n";
+	stats("  with asm", $sumasm1, $sumasm2, $sumfun);
+	stats("    incl nested", $sumnasm1, $sumnasm2, $sumfun);
+	stats("  with ext call", $sumecall1, $sumecall2, $sumfun);
+	stats("    incl nested", $sumnecall1, $sumnecall2, $sumfun);
+	stats("  with lock", $sumlock1, $sumlock2, $sumfun);
+	stats("    incl nested", $sumnlock1, $sumnlock2, $sumfun);
+	stats("  with loop", $sumloop1, $sumloop2, $sumfun);
+	stats("    incl nested", $sumnloop1, $sumnloop2, $sumfun);
+	stats("  w/o asm+call", $sumsafe1, $sumsafe2, $sumfun);
+	stats("  w/o asm+call+loop", $sumsafel1, $sumsafel2, $sumfun);
+}
 
 0;
