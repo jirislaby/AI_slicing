@@ -19,6 +19,7 @@ typedef unsigned int __u32;
 typedef unsigned long __u64;
 typedef unsigned long size_t;
 #endif
+typedef unsigned gfp_t;
 
 int param_array_get() {return 0;}
 void param_array_set() {}
@@ -594,6 +595,24 @@ unsigned long msecs_to_jiffies(const unsigned int m)
 unsigned int jiffies_to_msecs(const unsigned long j)
 {
 	return (1000 / HZ) * j;
+}
+
+void *vmalloc(unsigned long size)
+{
+	extern void *malloc(size_t size);
+	return malloc(size);
+}
+
+void vfree(const void *addr)
+{
+	extern void free(void *ptr);
+	free((void *)addr);
+}
+
+void *__kmalloc(size_t size, gfp_t flags)
+{
+	extern void *malloc(size_t size);
+	return malloc(size);
 }
 
 void lock_kernel(void) { }
