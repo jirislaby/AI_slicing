@@ -24,16 +24,19 @@ while (<>) {
 		if ($ofun) {
 			print "for $ofile:\n";
 			print "  fun: $ofun/$fun\n";
-			print "    with asm: $oasm/$asm\n";
-			print "      incl nested: $onasm/$nasm\n";
-			print "    with call: $oecall/$ecall\n";
-			print "      incl nested: $onecall/$necall\n";
-			print "    with lock: $olock/$lock\n";
-			print "      incl nested: $onlock/$nlock\n";
-			print "    with loop: $oloop/$loop\n";
-			print "      incl nested: $onloop/$nloop\n";
+			print "    with asm: $onasm/$nasm\n";
+#			print "      incl nested: $onasm/$nasm\n";
+			print "    with call: $onecall/$necall\n";
+#			print "      incl nested: $onecall/$necall\n";
+			print "    with lock: $onlock/$nlock\n";
+#			print "      incl nested: $onlock/$nlock\n";
+			print "    with loop: $onloop/$nloop\n";
+#			print "      incl nested: $onloop/$nloop\n";
 			print "    safe: $osafe/$safe\n";
 			print "    safe w/o loop: $osafel/$safel\n";
+		}
+		if ($fun - $necall != $safe) {
+			print "WTF\n";
 		}
 		$sumfile++;
 		$sumfun += $ofun;
@@ -80,14 +83,14 @@ if ($sumins1) {
 	       100-100*$sumins2/$sumins1;
 	print "functions: $sumfun\n";
 	print "  WHAT: before slicing / after slicing\n";
-	stats("  with asm", $sumasm1, $sumasm2, $sumfun);
-	stats("    incl nested", $sumnasm1, $sumnasm2, $sumfun);
-	stats("  with ext call", $sumecall1, $sumecall2, $sumfun);
-	stats("    incl nested", $sumnecall1, $sumnecall2, $sumfun);
-	stats("  with lock", $sumlock1, $sumlock2, $sumfun);
-	stats("    incl nested", $sumnlock1, $sumnlock2, $sumfun);
-	stats("  with loop", $sumloop1, $sumloop2, $sumfun);
-	stats("    incl nested", $sumnloop1, $sumnloop2, $sumfun);
+	stats("  with asm", $sumnasm1, $sumnasm2, $sumfun);
+#	stats("    incl nested", $sumnasm1, $sumnasm2, $sumfun);
+	stats("  with ext call", $sumnecall1, $sumnecall2, $sumfun);
+#	stats("    incl nested", $sumnecall1, $sumnecall2, $sumfun);
+	stats("  with lock", $sumnlock1, $sumnlock2, $sumfun);
+#	stats("    incl nested", $sumnlock1, $sumnlock2, $sumfun);
+	stats("  with loop", $sumnloop1, $sumnloop2, $sumfun);
+#	stats("    incl nested", $sumnloop1, $sumnloop2, $sumfun);
 	stats("  w/o asm+call", $sumsafe1, $sumsafe2, $sumfun);
 	stats("  w/o asm+call+loop", $sumsafel1, $sumsafel2, $sumfun);
 }
