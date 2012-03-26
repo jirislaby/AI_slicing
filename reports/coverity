@@ -1,0 +1,121 @@
+arch/x86/mm/pageattr.c 471 Leaving function in locked state
+arch/x86/mm/pageattr.c 534 Leaving function in locked state
+block/blk-core.c 872 Leaving function in locked state
+block/blk-core.c 1241 Double Lock
+drivers/ata/libata-scsi.c 3049 Leaving function in locked state
+drivers/atm/he.c 1857 Leaving function in locked state
+drivers/block/cciss.c 2913 Leaving function in locked state
+drivers/block/cciss.c 2981 Leaving function in locked state
+drivers/block/nbd.c 558 Leaving function in locked state
+drivers/char/generic_serial.c 593 Leaving function in locked state
+drivers/char/ip2/i2lib.c 770 Leaving function in locked state
+drivers/ide/ide.c 148 Leaving function in locked state
+drivers/infiniband/hw/cxgb3/iwch_qp.c 836 Leaving function in locked state
+drivers/isdn/hisax/amd7930_fn.c 667 Leaving function in locked state
+drivers/isdn/hisax/icc.c 566 Leaving function in locked state
+drivers/isdn/i4l/isdn_net.h 96 Leaving function in locked state
+drivers/mtd/chips/cfi_cmdset_0001.c 886 Leaving function in locked state
+drivers/mtd/chips/cfi_cmdset_0001.c 924 Leaving function in locked state
+drivers/mtd/chips/cfi_cmdset_0001.c 947 Leaving function in locked state
+drivers/mtd/chips/cfi_cmdset_0001.c 1208 Leaving function in locked state
+drivers/mtd/chips/cfi_cmdset_0001.c 1249 Leaving function in locked state
+drivers/mtd/chips/cfi_cmdset_0002.c 579 Leaving function in locked state
+drivers/mtd/chips/cfi_cmdset_0002.c 618 Leaving function in locked state
+drivers/mtd/chips/cfi_cmdset_0002.c 628 Leaving function in locked state
+drivers/net/pcnet32.c 1140 Leaving function in locked state
+drivers/net/pcnet32.c 1143 Leaving function in locked state
+drivers/net/qlge/qlge_main.c 3541 Leaving function in locked state
+drivers/net/wireless/ath9k/xmit.c 1846 Leaving function in locked state
+drivers/net/wireless/orinoco.h 204 Leaving function in locked state
+drivers/pci/access.c 91 Leaving function in locked state
+drivers/scsi/aacraid/commsup.c 1272 Leaving function in locked state
+drivers/scsi/dpt_i2o.c 1362 Leaving function in locked state
+drivers/scsi/libiscsi.c 1318 Leaving function in locked state
+drivers/scsi/libiscsi.c 1324 Leaving function in locked state
+drivers/scsi/libiscsi.c 1337 Leaving function in locked state
+drivers/scsi/qla2xxx/qla_iocb.c 540 Leaving function in locked state
+drivers/scsi/scsi_lib.c 1533 Leaving function in locked state
+drivers/scsi/scsi_lib.c 1727 Leaving function in locked state
+fs/cifs/file.c 333 Leaving function in locked state
+fs/dcache.c 223 Double Lock
+fs/dcache.c 259 Leaving function in locked state
+fs/dcache.c 442 Double Lock
+fs/dcache.c 444 Leaving function in locked state
+fs/dcache.c 1534 Leaving function in locked state
+fs/ext4/mballoc.c 4189 Double Lock
+fs/ext4/mballoc.c 4218 Leaving function in locked state
+fs/fs-writeback.c 411 Leaving function in locked state
+fs/fuse/dev.c 682 Leaving function in locked state
+fs/fuse/dev.c 977 Leaving function in locked state
+fs/fuse/dev.c 1013 Leaving function in locked state
+fs/inotify.c 444 Leaving function in locked state
+fs/jbd/checkpoint.c 173 Leaving function in locked state
+fs/jbd2/checkpoint.c 175 Leaving function in locked state
+fs/jfs/jfs_logmgr.c 2101 Leaving function in locked state
+fs/jfs/jfs_txnmgr.c 204 Double Lock
+fs/jfs/jfs_txnmgr.c 383 Double Lock
+fs/jfs/jfs_txnmgr.c 395 Double Lock
+fs/jfs/jfs_txnmgr.c 406 Double Lock
+fs/jfs/jfs_txnmgr.c 416 Double Lock
+fs/jfs/jfs_txnmgr.c 477 Double Lock
+fs/jfs/jfs_txnmgr.c 486 Double Lock
+fs/jfs/jfs_txnmgr.c 861 Leaving function in locked state
+fs/mbcache.c 541 Leaving function in locked state
+fs/mbcache.c 586 Leaving function in locked state
+fs/namespace.c 279 Double Lock
+fs/ocfs2/dlm/dlmdomain.c 1748 Leaving function in locked state
+fs/ocfs2/dlm/dlmmaster.c 2720 Leaving function in locked state
+fs/ocfs2/dlm/dlmthread.c 80 Leaving function in locked state
+fs/ocfs2/dlm/dlmthread.c 217 Leaving function in locked state
+fs/super.c 343 Double Lock
+fs/xfs/xfs_filestream.c 316 Leaving function in locked state
+fs/xfs/xfs_filestream.c 325 Leaving function in locked state
+fs/xfs/xfs_filestream.c 347 Leaving function in locked state
+fs/xfs/xfs_filestream.c 498 Leaving function in locked state
+fs/xfs/xfs_filestream.c 683 Leaving function in locked state
+fs/xfs/xfs_mru_cache.c 563 Leaving function in locked state
+fs/xfs/xfs_mru_cache.c 592 Leaving function in locked state
+include/linux/netdevice.h 1570 Leaving function in locked state
+ipc/msg.c 208 Leaving function in locked state
+ipc/namespace.c 80 Double Lock
+ipc/sem.c 270 Leaving function in locked state
+ipc/shm.c 414 Leaving function in locked state
+kernel/audit_tree.c 319 Leaving function in locked state
+kernel/cgroup.c 2517 Leaving function in locked state
+kernel/futex.c 878 Leaving function in locked state
+kernel/futex.c 908 Double Lock
+kernel/futex.c 978 Leaving function in locked state
+kernel/rtmutex.c 581 Leaving function in locked state
+kernel/sched.c 4463 Double Lock
+kernel/sched.c 4509 Leaving function in locked state
+kernel/sched.c 9319 Double Lock
+kernel/sched.c 9342 Double Lock
+kernel/semaphore.c 233 Leaving function in locked state
+kernel/signal.c 1589 Leaving function in locked state
+kernel/signal.c 1741 Double Lock
+lib/dec_and_lock.c 30 Leaving function in locked state
+mm/memory.c 567 Double Lock
+mm/memory.c 569 Leaving function in locked state
+mm/memory.c 602 Leaving function in locked state
+mm/mmap.c 553 Double Lock
+mm/mmap.c 660 Leaving function in locked state
+mm/mmap.c 2398 Double Lock
+mm/mmap.c 2405 Double Lock
+mm/mremap.c 127 Leaving function in locked state
+net/atm/lec.c 1087 Leaving function in locked state
+net/bluetooth/rfcomm/sock.c 122 Leaving function in locked state
+net/core/dev.c 2403 Double Lock
+net/dccp/ccid.c 33 Leaving function in locked state
+net/ipv4/igmp.c 2304 Leaving function in locked state
+net/ipv4/igmp.c 2327 Leaving function in locked state
+net/ipv4/igmp.c 2459 Leaving function in locked state
+net/ipv4/igmp.c 2492 Leaving function in locked state
+net/ipv4/inet_connection_sock.c 179 Leaving function in locked state
+net/irda/irlmp.c 1873 Leaving function in locked state
+net/mac80211/scan.c 44 Double Lock
+net/netlink/af_netlink.c 194 Leaving function in locked state
+net/sctp/socket.c 5689 Leaving function in locked state
+net/xfrm/xfrm_policy.c 2362 Leaving function in locked state
+net/xfrm/xfrm_state.c 1960 Leaving function in locked state
+sound/core/pcm_native.c 708 Double Lock
+sound/core/pcm_native.c 784 Leaving function in locked state
