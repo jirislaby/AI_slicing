@@ -25,7 +25,10 @@ while (<>) {
 	chomp;
 	my ($file, $line) = split / /;
 	my $arrref = $flags{$file};
-	die "not found" unless (defined $arrref);
+	if (!defined $arrref) {
+		print "$file not found\n";
+		next;
+	}
 	my $flags = "gcc -E -w $$arrref[3] $$arrref[0] | ".
 		"clang -cc1 -w -analyze -analyzer-checker experimental.core.FunLines|";
 	open(FUNS, $flags) || die "cannot exec clang";
