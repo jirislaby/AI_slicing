@@ -9,11 +9,12 @@ while (<>) {
 	my $out = $2;
 	my $workdir = $3;
 	my $flags = $4;
-	my $filesan = $file;
-	$filesan =~ s@/@_@g;
-	my $tmph = File::Temp->new(TEMPLATE => "${filesan}XXXXXXX");
-	my $tmp = $tmph->filename;
-	$flags = "gcc -E -w -o $tmp $flags $file";
+	chdir $workdir;
+#	my $filesan = $file;
+#	$filesan =~ s@/@_@g;
+#	my $tmph = File::Temp->new(TEMPLATE => "${filesan}XXXXXXX");
+#	my $tmp = $tmph->filename; # -o $tmp here:
+	$flags = "gcc -E -w $flags $file";
 #	my @args = ("gcc", "-E", "-w", "-o", $tmp->filename);
 #	my $tn = 0;
 #	foreach (split/ /, $flags) {
@@ -29,9 +30,12 @@ while (<>) {
 #	}
 #	push @args, $file;
 #	print "$flags\n";
-	system $flags;
-	system "cppcheck --enable=all $tmp";
 #	system $args[0], @args;
+
+#	system $flags;
+#	system "cppcheck --enable=all $tmp";
+
+	system "$flags|clang -cc1 -analyze -analyzer-checker experimental.unix.PthreadLock -w";
 }
 
 1;
