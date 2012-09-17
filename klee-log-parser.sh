@@ -1,6 +1,7 @@
 #!/bin/bash
 
 for file in `find -type f -name *.log `; do
+	grep -q 'query timed out (resolve)' $file && echo -n H
 	grep -q 'HaltTimer invoked' $file && echo -n H
 	grep -q 'failed external call' $file && echo -n E
 	grep -qE 'memory error|invalid function pointer' $file && echo -n M
