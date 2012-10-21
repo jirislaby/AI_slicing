@@ -17,7 +17,7 @@ clang -g -nostdinc -emit-llvm -c "$LIB" -o library.o -O0 || exit 1
 
 find "$DIR" -type f -name '*.i' -print0| xargs -t -P3 -0 -n1 -I{} \
 	sh -c 'test ! -f {}.llvm -o {}.llvm -ot {} -o {}.llvm -ot library.o &&
-		clang -g -nostdinc -emit-llvm -O0 -w -c {} -o {}.comp 2>/dev/null &&
+		clang -g -nostdinc -emit-llvm -O0 -w -c {} -o {}.comp &&
 		opt -load LLVMSlicer.so -prepare {}.comp -o {}.prep &&
 		llvm-link -o {}.llvm {}.prep library.o &&
 		rm -f {}.comp {}.prep 2>/dev/null;

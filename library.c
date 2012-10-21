@@ -668,9 +668,10 @@ int atomic_notifier_call_chain(struct atomic_notifier_head *nh,
 	return 0;
 }
 
-static char current_data[16 * 1024];
+static char __ai_current_data[16 * 1024];
 struct task_struct;
-struct task_struct *__ai_current_singleton = (struct task_struct *)current_data;
+struct task_struct *__ai_current_singleton =
+		(struct task_struct *)__ai_current_data;
 
 int __dynamic_dbg_enabled_helper(char *modname, int type, int value, int hash)
 {

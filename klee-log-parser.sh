@@ -1,6 +1,12 @@
 #!/bin/bash
 
-for file in `find -type f -name *.log `; do
+if [ $# -eq 0 ]; then
+	FILES=`find -type f -name *.log `
+else
+	FILES="$1"
+fi
+
+for file in $FILES; do
 	grep -q 'query timed out (resolve)' $file && echo -n H
 	grep -q 'HaltTimer invoked' $file && echo -n H
 	grep -q 'failed external call' $file && echo -n E
