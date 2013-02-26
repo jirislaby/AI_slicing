@@ -564,6 +564,28 @@ found_middle:
 	return result + __ffs(tmp);
 }
 
+unsigned long find_first_zero_bit(const unsigned long *addr, unsigned long size)
+{
+	const unsigned long *p = addr;
+	unsigned long result = 0;
+	unsigned long tmp;
+
+	while (size & ~(BITS_PER_LONG-1)) {
+		if (~(tmp = *(p++)))
+			goto found;
+		result += BITS_PER_LONG;
+		size -= BITS_PER_LONG;
+	}
+	if (!size)
+		return result;
+
+	tmp = (*p) | (~0UL << size);
+	if (tmp == ~0UL)	/* Are any bits zero? */
+		return result + size;   /* Nope. */
+found:
+	return result + ffz(tmp);
+}
+
 unsigned long copy_to_user(void *to, const void *from, unsigned len)
 {
 	memcpy(to, from, len);
@@ -615,8 +637,36 @@ void *__kmalloc(size_t size, gfp_t flags)
 	return malloc(size);
 }
 
+char *kstrdup(const char *s, gfp_t gfp)
+{
+	extern void *malloc(size_t size);
+	size_t len = strlen(s);
+	char *ret = malloc(len);
+	if (ret)
+		memcpy(ret, s, len);
+	return ret;
+}
+
+int kthread_should_stop(void)
+{
+	extern int klee_int(const char *name);
+	return klee_int("kthread_should_stop");
+}
+
+int net_ratelimit(void)
+{
+	return 0;
+}
+
 void lock_kernel(void) { }
 void unlock_kernel(void) { }
+
+struct atomic_notifier_head;
+int atomic_notifier_call_chain(struct atomic_notifier_head *nh,
+		unsigned long val, void *v)
+{
+	return 0;
+}
 
 static char current_data[16 * 1024];
 struct task_struct;
