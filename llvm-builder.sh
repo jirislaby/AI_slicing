@@ -13,7 +13,9 @@ if [ $# -gt 0 ]; then
 	DIR=$1
 fi
 
-clang -g -nostdinc -emit-llvm -c "$LIB" -o library.o -O0 || exit 1
+if [ library.o -ot "$LIB" ]; then
+	clang -g -nostdinc -emit-llvm -c "$LIB" -o library.o -O0 || exit 1
+fi
 
 find "$DIR" -type f -name '*.i' -print0| xargs -t -P3 -0 -n1 -I{} \
 	sh -c 'test ! -f {}.llvm -o {}.llvm -ot {} -o {}.llvm -ot library.o &&
