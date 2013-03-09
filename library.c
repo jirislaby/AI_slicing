@@ -13,6 +13,7 @@
 
 typedef unsigned short __u16;
 typedef unsigned int __u32;
+typedef unsigned int u32;
 #if BITS_PER_LONG == 32
 #error TODO
 #else
@@ -21,12 +22,70 @@ typedef unsigned long size_t;
 #endif
 typedef unsigned gfp_t;
 
+struct atomic_notifier_head;
+struct device;
+struct device_driver;
+struct lock_class_key;
+struct module;
+struct mutex;
+struct pci_dev;
+struct pci_driver;
+struct task_struct;
+
+extern int klee_int(const char *name);
+extern int klee_range(int begin, int end, const char *name);
+
 int param_array_get() {return 0;}
 void param_array_set() {}
 int param_get_int() {return 0;}
 short param_get_short() {return 0;}
 void param_set_int() {}
 void param_set_short() {}
+
+#define ACCESSOR(ret, letter, size)		\
+unsigned ret read##letter(const void *addr) {	\
+	return klee_range(0, size, __func__);	\
+}
+
+ACCESSOR(char, b, 0xff);
+ACCESSOR(short, w, 0xffff);
+ACCESSOR(int, l, 0xffffffff);
+ACCESSOR(long, q, 0xfffffff);
+#undef ACCESSOR
+
+#define DUP(from, to, ret, param_type)	\
+unsigned ret to(param_type addr) {	\
+	return from(NULL);		\
+}
+
+DUP(readb, inb, char, unsigned long);
+DUP(readw, inw, short, unsigned long);
+DUP(readl, inl, int, unsigned long);
+
+DUP(readb, inb_p, char, unsigned long);
+DUP(readw, inw_p, short, unsigned long);
+DUP(readl, inl_p, int, unsigned long);
+
+DUP(readb, __readb, char, void *);
+DUP(readw, __readw, short, void *);
+DUP(readl, __readl, int, void *);
+DUP(readq, __readq, long, void *);
+#undef DUP
+
+#define ACCESSOR(letter, type)					\
+void ins##letter(unsigned long addr, void *buffer, int count)	\
+{								\
+	unsigned type *buf = buffer;				\
+	while (count) {						\
+		*buf++ = readb(NULL);				\
+		count--;					\
+	}							\
+}
+
+ACCESSOR(b, char);
+ACCESSOR(w, short);
+ACCESSOR(l, int);
+#undef ACCESSOR
 
 int memcmp(const void *cs, const void *ct, size_t count)
 {
@@ -169,8 +228,6 @@ int strict_strtoul(const char *cp, unsigned int base, unsigned long *res)
 	return -EINVAL;
 }
 
-struct mutex;
-struct lock_class_key;
 void __mutex_init(struct mutex *lock, const char *name,
 		struct lock_class_key *key)
 {
@@ -564,6 +621,28 @@ found_middle:
 	return result + __ffs(tmp);
 }
 
+unsigned long find_first_bit(const unsigned long *addr, unsigned long size)
+{
+	const unsigned long *p = addr;
+	unsigned long result = 0;
+	unsigned long tmp;
+
+	while (size & ~(BITS_PER_LONG-1)) {
+		if ((tmp = *(p++)))
+			goto found;
+		result += BITS_PER_LONG;
+		size -= BITS_PER_LONG;
+	}
+	if (!size)
+		return result;
+
+	tmp = (*p) & (~0UL >> (BITS_PER_LONG - size));
+	if (tmp == 0UL)		/* Are any bits set? */
+		return result + size;	/* Nope. */
+found:
+	return result + __ffs(tmp);
+}
+
 unsigned long find_first_zero_bit(const unsigned long *addr, unsigned long size)
 {
 	const unsigned long *p = addr;
@@ -598,10 +677,30 @@ unsigned long copy_from_user(void *to, const void *from, unsigned len)
 	return 0;
 }
 
-struct device;
+int __copy_from_user_inatomic(void *dst, const void *src, unsigned size)
+{
+	return copy_from_user(dst, src, size);
+}
+
 const char *dev_driver_string(const struct device *dev)
 {
 	return "";
+}
+
+int driver_register(struct device_driver *drv)
+{
+	return 0;
+}
+
+int pci_enable_device(struct pci_dev *dev)
+{
+	return 0;
+}
+
+int __pci_register_driver(struct pci_driver *drv, struct module *owner,
+			  const char *mod_name)
+{
+	return 0;
 }
 
 int capable(int cap)
@@ -637,6 +736,12 @@ void *__kmalloc(size_t size, gfp_t flags)
 	return malloc(size);
 }
 
+unsigned long __get_free_pages(gfp_t gfp_mask, unsigned int order)
+{
+	extern void *malloc(size_t size);
+	return (unsigned long)malloc(4096 * (1 << order));
+}
+
 char *kstrdup(const char *s, gfp_t gfp)
 {
 	extern void *malloc(size_t size);
@@ -649,8 +754,18 @@ char *kstrdup(const char *s, gfp_t gfp)
 
 int kthread_should_stop(void)
 {
-	extern int klee_int(const char *name);
 	return klee_int("kthread_should_stop");
+}
+
+struct task_struct *kthread_create(int (*threadfn)(void *data),
+		void *data, const char namefmt[], ...)
+{
+	return NULL;
+}
+
+u32 random32(void)
+{
+	return klee_int(__func__);
 }
 
 int net_ratelimit(void)
@@ -661,7 +776,6 @@ int net_ratelimit(void)
 void lock_kernel(void) { }
 void unlock_kernel(void) { }
 
-struct atomic_notifier_head;
 int atomic_notifier_call_chain(struct atomic_notifier_head *nh,
 		unsigned long val, void *v)
 {
@@ -669,7 +783,6 @@ int atomic_notifier_call_chain(struct atomic_notifier_head *nh,
 }
 
 static char __ai_current_data[16 * 1024];
-struct task_struct;
 struct task_struct *__ai_current_singleton =
 		(struct task_struct *)__ai_current_data;
 
@@ -713,4 +826,9 @@ void assfail(char *expr, char *file, int line)
 void panic(const char *fmt, ...)
 {
 	__assert_fail(fmt, "unknown", 0, "unknown");
+}
+
+unsigned long get_seconds(void)
+{
+	return 100;
 }
