@@ -34,6 +34,7 @@ struct task_struct;
 
 extern int klee_int(const char *name);
 extern int klee_range(int begin, int end, const char *name);
+extern void klee_make_symbolic(void *addr, size_t nbytes, const char *name);
 
 int param_array_get() {return 0;}
 void param_array_set() {}
@@ -42,15 +43,17 @@ short param_get_short() {return 0;}
 void param_set_int() {}
 void param_set_short() {}
 
-#define ACCESSOR(ret, letter, size)		\
-unsigned ret read##letter(const void *addr) {	\
-	return klee_range(0, size, __func__);	\
+#define ACCESSOR(ret, letter)					\
+unsigned ret read##letter(const void *addr) {			\
+	unsigned ret __val;					\
+	klee_make_symbolic(&__val, sizeof(__val), __func__);	\
+	return __val;						\
 }
 
-ACCESSOR(char, b, 0xff);
-ACCESSOR(short, w, 0xffff);
-ACCESSOR(int, l, 0xffffffff);
-ACCESSOR(long, q, 0xfffffff);
+ACCESSOR(char, b);
+ACCESSOR(short, w);
+ACCESSOR(int, l);
+ACCESSOR(long, q);
 #undef ACCESSOR
 
 #define DUP(from, to, ret, param_type)	\
