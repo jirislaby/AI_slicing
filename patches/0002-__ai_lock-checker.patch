@@ -1,0 +1,49 @@
+From 8d48d6a9bd321382f8099b3b2dd43e867bd4338d Mon Sep 17 00:00:00 2001
+From: Jiri Slaby <jslaby@suse.cz>
+Date: Sat, 31 Mar 2012 22:37:56 +0200
+Subject: [PATCH 2/2] __ai_lock checker
+
+Signed-off-by: Jiri Slaby <jslaby@suse.cz>
+---
+ lib/StaticAnalyzer/Checkers/PthreadLockChecker.cpp | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/lib/StaticAnalyzer/Checkers/PthreadLockChecker.cpp b/lib/StaticAnalyzer/Checkers/PthreadLockChecker.cpp
+index d9b6384..8dd679e 100644
+--- a/lib/StaticAnalyzer/Checkers/PthreadLockChecker.cpp
++++ b/lib/StaticAnalyzer/Checkers/PthreadLockChecker.cpp
+@@ -18,6 +18,7 @@
+ #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerContext.h"
+ #include "clang/StaticAnalyzer/Core/BugReporter/BugType.h"
+ #include "clang/StaticAnalyzer/Core/PathSensitive/ProgramStateTrait.h"
++#include "clang/Basic/SourceManager.h"
+ #include "llvm/ADT/ImmutableList.h"
+ 
+ using namespace clang;
+@@ -57,9 +58,12 @@ void PthreadLockChecker::checkPostStmt(const CallExpr *CE,
+   if (CE->getNumArgs() != 1)
+     return;
+ 
++//  llvm::errs() << FName << "\n";
++
+   if (FName == "pthread_mutex_lock" ||
+       FName == "pthread_rwlock_rdlock" ||
+-      FName == "pthread_rwlock_wrlock")
++      FName == "pthread_rwlock_wrlock" ||
++      FName == "__ai_lock")
+     AcquireLock(C, CE, state->getSVal(CE->getArg(0), LCtx),
+                 false, PthreadSemantics);
+   else if (FName == "lck_mtx_lock" ||
+@@ -80,7 +84,8 @@ void PthreadLockChecker::checkPostStmt(const CallExpr *CE,
+   else if (FName == "pthread_mutex_unlock" ||
+            FName == "pthread_rwlock_unlock" ||
+            FName == "lck_mtx_unlock" ||
+-           FName == "lck_rw_done")
++           FName == "lck_rw_done" ||
++	   FName == "__ai_unlock")
+     ReleaseLock(C, CE, state->getSVal(CE->getArg(0), LCtx));
+ }
+ 
+-- 
+1.8.3.4
+

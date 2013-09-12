@@ -1,0 +1,102 @@
+From 2d39c4d10b5f29fd5f6e744d116d5b77d4102e44 Mon Sep 17 00:00:00 2001
+From: Jiri Slaby <jirislaby@gmail.com>
+Date: Sat, 31 Mar 2012 23:40:29 +0200
+Subject: [PATCH 1/2] FunLinesChecker
+
+Signed-off-by: Jiri Slaby <jirislaby@gmail.com>
+---
+ lib/StaticAnalyzer/Checkers/CMakeLists.txt      |  1 +
+ lib/StaticAnalyzer/Checkers/Checkers.td         |  4 ++
+ lib/StaticAnalyzer/Checkers/FunLinesChecker.cpp | 53 +++++++++++++++++++++++++
+ 3 files changed, 58 insertions(+)
+ create mode 100644 lib/StaticAnalyzer/Checkers/FunLinesChecker.cpp
+
+diff --git a/lib/StaticAnalyzer/Checkers/CMakeLists.txt b/lib/StaticAnalyzer/Checkers/CMakeLists.txt
+index 8e455de..8aca909 100644
+--- a/lib/StaticAnalyzer/Checkers/CMakeLists.txt
++++ b/lib/StaticAnalyzer/Checkers/CMakeLists.txt
+@@ -33,6 +33,7 @@ add_clang_library(clangStaticAnalyzerCheckers
+   ExprInspectionChecker.cpp
+   SimpleStreamChecker.cpp
+   FixedAddressChecker.cpp
++  FunLinesChecker.cpp
+   GenericTaintChecker.cpp
+   IdempotentOperationChecker.cpp
+   IvarInvalidationChecker.cpp
+diff --git a/lib/StaticAnalyzer/Checkers/Checkers.td b/lib/StaticAnalyzer/Checkers/Checkers.td
+index 235e633..9a6c7a7 100644
+--- a/lib/StaticAnalyzer/Checkers/Checkers.td
++++ b/lib/StaticAnalyzer/Checkers/Checkers.td
+@@ -104,6 +104,10 @@ def FixedAddressChecker : Checker<"FixedAddr">,
+   HelpText<"Check for assignment of a fixed address to a pointer">,
+   DescFile<"FixedAddressChecker.cpp">;
+ 
++def FunLinesChecker : Checker<"FunLines">,
++  HelpText<"Prints functions start and end lines">,
++  DescFile<"FunLinesChecker.cpp">;
++
+ def PointerArithChecker : Checker<"PointerArithm">,
+   HelpText<"Check for pointer arithmetic on locations other than array elements">,
+   DescFile<"PointerArithChecker">;
+diff --git a/lib/StaticAnalyzer/Checkers/FunLinesChecker.cpp b/lib/StaticAnalyzer/Checkers/FunLinesChecker.cpp
+new file mode 100644
+index 0000000..8deb265
+--- /dev/null
++++ b/lib/StaticAnalyzer/Checkers/FunLinesChecker.cpp
+@@ -0,0 +1,53 @@
++//===- FunLineschecker.cpp -------- Dump Function Lines --------*- C/C++ -*-==//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++//
++//  This file prints starts and ends of function definitons.
++//
++//===----------------------------------------------------------------------===//
++
++#include "ClangSACheckers.h"
++#include "clang/StaticAnalyzer/Core/Checker.h"
++#include "clang/StaticAnalyzer/Core/CheckerManager.h"
++#include "clang/StaticAnalyzer/Core/BugReporter/BugType.h"
++#include "clang/StaticAnalyzer/Core/PathSensitive/AnalysisManager.h"
++#include "clang/Basic/SourceManager.h"
++
++using namespace clang;
++using namespace ento;
++
++namespace {
++
++class FunLinesChecker : public Checker<check::ASTCodeBody> {
++
++public:
++  FunLinesChecker() {}
++  
++  static void *getTag() {
++    static int x;
++    return &x;
++  }
++  
++  void checkASTCodeBody(const Decl *D, AnalysisManager &mgr, BugReporter &BR) const;
++};
++
++}
++void FunLinesChecker::checkASTCodeBody(const Decl *D, AnalysisManager &mgr,
++		BugReporter &BR) const {
++	const FunctionDecl *FD = dyn_cast<FunctionDecl>(D);
++	IdentifierInfo *II = FD->getIdentifier();
++	SourceManager &SM = mgr.getSourceManager();
++	const PresumedLoc &sloc = SM.getPresumedLoc(D->getLocStart());
++	const PresumedLoc &eloc = SM.getPresumedLoc(D->getLocEnd());
++	llvm::outs() << II->getName() << ": " << sloc.getFilename() << ":" <<
++		sloc.getLine() << "-" << eloc.getLine() << "\n";
++}
++
++void ento::registerFunLinesChecker(CheckerManager &mgr) {
++  mgr.registerChecker<FunLinesChecker>();
++}
+-- 
+1.8.3.4
+
