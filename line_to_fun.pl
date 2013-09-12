@@ -1,37 +1,50 @@
 #!/usr/bin/perl -w
 use strict;
 
-my $jf = $ARGV[0];
-shift;
+my $jf = undef;
+if (0) {
+	my $jf = $ARGV[0];
+	shift;
+}
 my $crop = $ARGV[0];
 my $croplen = length($crop);
 shift;
 
-my %funs;
 my %flags;
 
-open(JF, "<$jf") || die "cannot open '$jf'";
-while (<JF>) {
-	/^{(.*)},{(.*)},{(.*)},{(.*)}$/ || die "bad input";
-	my $file = $1;
-	if (substr($file, 0, $croplen) eq $crop) {
-		$file = substr($file, $croplen);
+if (defined $jf) {
+	open(JF, "<$jf") || die "cannot open '$jf'";
+	while (<JF>) {
+		/^{(.*)},{(.*)},{(.*)},{(.*)}$/ || die "bad input";
+		my $file = $1;
+		if (substr($file, 0, $croplen) eq $crop) {
+			$file = substr($file, $croplen);
+		}
+		$flags{$file} = [ $1, $2, $3, $4 ];
 	}
-	$flags{$file} = [ $1, $2, $3, $4 ];
+	close JF;
 }
-close JF;
 
 while (<>) {
 	chomp;
 	my ($file, $line) = split / /;
-	my $arrref = $flags{$file};
-	if (!defined $arrref) {
-		print "$file not found\n";
-		next;
+	die "invalid input" unless defined $line;
+
+	my $flags = "clang -cc1 -w -analyze -analyzer-checker alpha.core.FunLines";
+	if (defined $jf) {
+		my $arrref = $flags{$file};
+		if (!defined $arrref) {
+			print "$file not found\n";
+			next;
+		}
+		$flags = "gcc -E -w $$arrref[3] $$arrref[0] | $flags";
+	} else {
+		my $file1 = $file;
+		$file1 =~ s/\.c$/.i/;
+		$flags = "$flags $file1";
 	}
-	my $flags = "gcc -E -w $$arrref[3] $$arrref[0] | ".
-		"clang -cc1 -w -analyze -analyzer-checker experimental.core.FunLines|";
-	open(FUNS, $flags) || die "cannot exec clang";
+
+	open(FUNS, "$flags|") || die "cannot exec clang";
 	while (<FUNS>) {
 		chomp;
 		/^(.+): (.+):([0-9]+)-([0-9]+)$/ || die "bad input";
