@@ -8,7 +8,7 @@ fi
 
 for file in $FILES; do
 #	grep -q 'LastChar > FirstChar' $file && echo -n X
-	grep -q 'query timed out (resolve)' $file && echo -n 'ESTPTIMEOUT '
+	grep -q '[Qq]uery timed out (' $file && echo -n 'ESTPTIMEOUT '
 	grep -q 'HaltTimer invoked' $file && echo -n 'EKLEETIMEOUT '
 	grep -q 'failed external call' $file && echo -n 'EEXTERNCALL '
 	grep -q 'ERROR: unable to load symbol' $file && echo -n 'ELOADSYM '
