@@ -1,0 +1,1000 @@
+From 3d5d09d1394c7afbb53de386b2c6699dfd525d5b Mon Sep 17 00:00:00 2001
+From: Jiri Slaby <jslaby@suse.cz>
+Date: Thu, 16 Apr 2015 12:37:35 +0200
+Subject: [PATCH] symbolic execution
+
+---
+ Makefile                         |   2 +-
+ arch/x86/include/asm/atomic.h    |  17 ++-
+ arch/x86/include/asm/bitops.h    | 171 +++++++++------------
+ arch/x86/include/asm/current.h   |   2 +-
+ arch/x86/include/asm/page.h      |   1 +
+ arch/x86/include/asm/preempt.h   |   4 +-
+ arch/x86/include/asm/processor.h |   6 -
+ fs/btrfs/Makefile                |   2 +-
+ fs/btrfs/disk-io.c               |   3 +-
+ fs/btrfs/main.c                  | 319 +++++++++++++++++++++++++++++++++++++++
+ fs/btrfs/raid56.c                |   4 +-
+ fs/btrfs/super.c                 |   2 +-
+ fs/inode.c                       |  11 +-
+ include/linux/compiler-gcc.h     |   2 +-
+ include/linux/rwlock.h           |  30 ++--
+ include/linux/spinlock.h         |  11 +-
+ 16 files changed, 434 insertions(+), 153 deletions(-)
+ create mode 100644 fs/btrfs/main.c
+
+diff --git a/Makefile b/Makefile
+index b7521af5b742..b4cf6bf6bad0 100644
+--- a/Makefile
++++ b/Makefile
+@@ -794,7 +794,7 @@ KBUILD_ARFLAGS := $(call ar-option,D)
+ 
+ # check for 'asm goto'
+ ifeq ($(shell $(CONFIG_SHELL) $(srctree)/scripts/gcc-goto.sh $(CC)), y)
+-	KBUILD_CFLAGS += -DCC_HAVE_ASM_GOTO
++	KBUILD_CFLAGS += -DCC_HAVE_ASM_GOTO1
+ endif
+ 
+ include $(srctree)/scripts/Makefile.kasan
+diff --git a/arch/x86/include/asm/atomic.h b/arch/x86/include/asm/atomic.h
+index 5e5cd123fdfb..6cc8362b2f83 100644
+--- a/arch/x86/include/asm/atomic.h
++++ b/arch/x86/include/asm/atomic.h
+@@ -89,8 +89,7 @@ static inline int atomic_sub_and_test(int i, atomic_t *v)
+  */
+ static inline void atomic_inc(atomic_t *v)
+ {
+-	asm volatile(LOCK_PREFIX "incl %0"
+-		     : "+m" (v->counter));
++	++v->counter;
+ }
+ 
+ /**
+@@ -101,8 +100,7 @@ static inline void atomic_inc(atomic_t *v)
+  */
+ static inline void atomic_dec(atomic_t *v)
+ {
+-	asm volatile(LOCK_PREFIX "decl %0"
+-		     : "+m" (v->counter));
++	--v->counter;
+ }
+ 
+ /**
+@@ -115,7 +113,7 @@ static inline void atomic_dec(atomic_t *v)
+  */
+ static inline int atomic_dec_and_test(atomic_t *v)
+ {
+-	GEN_UNARY_RMWcc(LOCK_PREFIX "decl", v->counter, "%0", "e");
++	return --v->counter == 0;
+ }
+ 
+ /**
+@@ -174,12 +172,17 @@ static inline int atomic_sub_return(int i, atomic_t *v)
+ 
+ static inline int atomic_cmpxchg(atomic_t *v, int old, int new)
+ {
+-	return cmpxchg(&v->counter, old, new);
++	int mold = v->counter;
++	if (mold == old)
++		v->counter = new;
++	return mold;
+ }
+ 
+ static inline int atomic_xchg(atomic_t *v, int new)
+ {
+-	return xchg(&v->counter, new);
++	int old = v->counter;
++	v->counter = new;
++	return old;
+ }
+ 
+ /**
+diff --git a/arch/x86/include/asm/bitops.h b/arch/x86/include/asm/bitops.h
+index bf4c754135ec..88e8e7764596 100644
+--- a/arch/x86/include/asm/bitops.h
++++ b/arch/x86/include/asm/bitops.h
+@@ -56,6 +56,23 @@
+ #define TB_BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
+ 
+ /**
++ * __set_bit - Set a bit in memory
++ * @nr: the bit to set
++ * @addr: the address to start counting from
++ *
++ * Unlike set_bit(), this function is non-atomic and may be reordered.
++ * If it's called on the same region of memory simultaneously, the effect
++ * may be that only one operation succeeds.
++ */
++static inline void __set_bit(long nr, volatile unsigned long *addr)
++{
++	unsigned long mask = BIT_MASK(nr);
++	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
++
++	*p |= mask;
++}
++
++/**
+  * set_bit - Atomically set a bit in memory
+  * @nr: the bit to set
+  * @addr: the address to start counting from
+@@ -73,29 +90,15 @@
+ static __always_inline void
+ set_bit(long nr, volatile unsigned long *addr)
+ {
+-	if (IS_IMMEDIATE(nr)) {
+-		asm volatile(LOCK_PREFIX "orb %1,%0"
+-			: CONST_MASK_ADDR(nr, addr)
+-			: "iq" ((u8)CONST_MASK(nr))
+-			: "memory");
+-	} else {
+-		asm volatile(LOCK_PREFIX "bts %1,%0"
+-			: BITOP_ADDR(addr) : "Ir" (nr) : "memory");
+-	}
++	__set_bit(nr, addr);
+ }
+ 
+-/**
+- * __set_bit - Set a bit in memory
+- * @nr: the bit to set
+- * @addr: the address to start counting from
+- *
+- * Unlike set_bit(), this function is non-atomic and may be reordered.
+- * If it's called on the same region of memory simultaneously, the effect
+- * may be that only one operation succeeds.
+- */
+-static inline void __set_bit(long nr, volatile unsigned long *addr)
++static inline void __clear_bit(long nr, volatile unsigned long *addr)
+ {
+-	asm volatile("bts %1,%0" : ADDR : "Ir" (nr) : "memory");
++	unsigned long mask = BIT_MASK(nr);
++	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
++
++	*p &= ~mask;
+ }
+ 
+ /**
+@@ -111,15 +114,7 @@ static inline void __set_bit(long nr, volatile unsigned long *addr)
+ static __always_inline void
+ clear_bit(long nr, volatile unsigned long *addr)
+ {
+-	if (IS_IMMEDIATE(nr)) {
+-		asm volatile(LOCK_PREFIX "andb %1,%0"
+-			: CONST_MASK_ADDR(nr, addr)
+-			: "iq" ((u8)~CONST_MASK(nr)));
+-	} else {
+-		asm volatile(LOCK_PREFIX "btr %1,%0"
+-			: BITOP_ADDR(addr)
+-			: "Ir" (nr));
+-	}
++	__clear_bit(nr, addr);
+ }
+ 
+ /*
+@@ -136,11 +131,6 @@ static inline void clear_bit_unlock(long nr, volatile unsigned long *addr)
+ 	clear_bit(nr, addr);
+ }
+ 
+-static inline void __clear_bit(long nr, volatile unsigned long *addr)
+-{
+-	asm volatile("btr %1,%0" : ADDR : "Ir" (nr));
+-}
+-
+ /*
+  * __clear_bit_unlock - Clears a bit in memory
+  * @nr: Bit to clear
+@@ -170,7 +160,10 @@ static inline void __clear_bit_unlock(long nr, volatile unsigned long *addr)
+  */
+ static inline void __change_bit(long nr, volatile unsigned long *addr)
+ {
+-	asm volatile("btc %1,%0" : ADDR : "Ir" (nr));
++	unsigned long mask = BIT_MASK(nr);
++	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
++
++	*p ^= mask;
+ }
+ 
+ /**
+@@ -184,15 +177,26 @@ static inline void __change_bit(long nr, volatile unsigned long *addr)
+  */
+ static inline void change_bit(long nr, volatile unsigned long *addr)
+ {
+-	if (IS_IMMEDIATE(nr)) {
+-		asm volatile(LOCK_PREFIX "xorb %1,%0"
+-			: CONST_MASK_ADDR(nr, addr)
+-			: "iq" ((u8)CONST_MASK(nr)));
+-	} else {
+-		asm volatile(LOCK_PREFIX "btc %1,%0"
+-			: BITOP_ADDR(addr)
+-			: "Ir" (nr));
+-	}
++	__change_bit(nr, addr);
++}
++
++/**
++ * __test_and_set_bit - Set a bit and return its old value
++ * @nr: Bit to set
++ * @addr: Address to count from
++ *
++ * This operation is non-atomic and can be reordered.
++ * If two examples of this operation race, one can appear to succeed
++ * but actually fail.  You must protect multiple accesses with a lock.
++ */
++static inline int __test_and_set_bit(long nr, volatile unsigned long *addr)
++{
++	unsigned long mask = BIT_MASK(nr);
++	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
++	unsigned long old = *p;
++
++	*p = old | mask;
++	return (old & mask) != 0;
+ }
+ 
+ /**
+@@ -205,7 +209,7 @@ static inline void change_bit(long nr, volatile unsigned long *addr)
+  */
+ static inline int test_and_set_bit(long nr, volatile unsigned long *addr)
+ {
+-	GEN_BINARY_RMWcc(LOCK_PREFIX "bts", *addr, "Ir", nr, "%0", "c");
++	return __test_and_set_bit(nr, addr);
+ }
+ 
+ /**
+@@ -221,24 +225,31 @@ test_and_set_bit_lock(long nr, volatile unsigned long *addr)
+ 	return test_and_set_bit(nr, addr);
+ }
+ 
++
+ /**
+- * __test_and_set_bit - Set a bit and return its old value
+- * @nr: Bit to set
++ * __test_and_clear_bit - Clear a bit and return its old value
++ * @nr: Bit to clear
+  * @addr: Address to count from
+  *
+  * This operation is non-atomic and can be reordered.
+  * If two examples of this operation race, one can appear to succeed
+  * but actually fail.  You must protect multiple accesses with a lock.
++ *
++ * Note: the operation is performed atomically with respect to
++ * the local CPU, but not other CPUs. Portable code should not
++ * rely on this behaviour.
++ * KVM relies on this behaviour on x86 for modifying memory that is also
++ * accessed from a hypervisor on the same CPU if running in a VM: don't change
++ * this without also updating arch/x86/kernel/kvm.c
+  */
+-static inline int __test_and_set_bit(long nr, volatile unsigned long *addr)
++static inline int __test_and_clear_bit(long nr, volatile unsigned long *addr)
+ {
+-	int oldbit;
++	unsigned long mask = BIT_MASK(nr);
++	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
++	unsigned long old = *p;
+ 
+-	asm("bts %2,%1\n\t"
+-	    "sbb %0,%0"
+-	    : "=r" (oldbit), ADDR
+-	    : "Ir" (nr));
+-	return oldbit;
++	*p = old & ~mask;
++	return (old & mask) != 0;
+ }
+ 
+ /**
+@@ -251,47 +262,18 @@ static inline int __test_and_set_bit(long nr, volatile unsigned long *addr)
+  */
+ static inline int test_and_clear_bit(long nr, volatile unsigned long *addr)
+ {
+-	GEN_BINARY_RMWcc(LOCK_PREFIX "btr", *addr, "Ir", nr, "%0", "c");
+-}
+-
+-/**
+- * __test_and_clear_bit - Clear a bit and return its old value
+- * @nr: Bit to clear
+- * @addr: Address to count from
+- *
+- * This operation is non-atomic and can be reordered.
+- * If two examples of this operation race, one can appear to succeed
+- * but actually fail.  You must protect multiple accesses with a lock.
+- *
+- * Note: the operation is performed atomically with respect to
+- * the local CPU, but not other CPUs. Portable code should not
+- * rely on this behaviour.
+- * KVM relies on this behaviour on x86 for modifying memory that is also
+- * accessed from a hypervisor on the same CPU if running in a VM: don't change
+- * this without also updating arch/x86/kernel/kvm.c
+- */
+-static inline int __test_and_clear_bit(long nr, volatile unsigned long *addr)
+-{
+-	int oldbit;
+-
+-	asm volatile("btr %2,%1\n\t"
+-		     "sbb %0,%0"
+-		     : "=r" (oldbit), ADDR
+-		     : "Ir" (nr));
+-	return oldbit;
++	return __test_and_clear_bit(nr, addr);
+ }
+ 
+ /* WARNING: non atomic and it can be reordered! */
+ static inline int __test_and_change_bit(long nr, volatile unsigned long *addr)
+ {
+-	int oldbit;
+-
+-	asm volatile("btc %2,%1\n\t"
+-		     "sbb %0,%0"
+-		     : "=r" (oldbit), ADDR
+-		     : "Ir" (nr) : "memory");
++	unsigned long mask = BIT_MASK(nr);
++	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
++	unsigned long old = *p;
+ 
+-	return oldbit;
++	*p = old ^ mask;
++	return (old & mask) != 0;
+ }
+ 
+ /**
+@@ -304,7 +286,7 @@ static inline int __test_and_change_bit(long nr, volatile unsigned long *addr)
+  */
+ static inline int test_and_change_bit(long nr, volatile unsigned long *addr)
+ {
+-	GEN_BINARY_RMWcc(LOCK_PREFIX "btc", *addr, "Ir", nr, "%0", "c");
++	return __test_and_change_bit(nr, addr);
+ }
+ 
+ static __always_inline int constant_test_bit(long nr, const volatile unsigned long *addr)
+@@ -315,14 +297,7 @@ static __always_inline int constant_test_bit(long nr, const volatile unsigned lo
+ 
+ static inline int variable_test_bit(long nr, volatile const unsigned long *addr)
+ {
+-	int oldbit;
+-
+-	asm volatile("bt %2,%1\n\t"
+-		     "sbb %0,%0"
+-		     : "=r" (oldbit)
+-		     : "m" (*(unsigned long *)addr), "Ir" (nr));
+-
+-	return oldbit;
++	return constant_test_bit(nr, addr);
+ }
+ 
+ #if 0 /* Fool kernel-doc since it doesn't do macros yet */
+diff --git a/arch/x86/include/asm/current.h b/arch/x86/include/asm/current.h
+index 9476c04ee635..89a17a4aedaa 100644
+--- a/arch/x86/include/asm/current.h
++++ b/arch/x86/include/asm/current.h
+@@ -11,7 +11,7 @@ DECLARE_PER_CPU(struct task_struct *, current_task);
+ 
+ static __always_inline struct task_struct *get_current(void)
+ {
+-	return this_cpu_read_stable(current_task);
++	return current_task;
+ }
+ 
+ #define current get_current()
+diff --git a/arch/x86/include/asm/page.h b/arch/x86/include/asm/page.h
+index 802dde30c928..e81b8d6430f7 100644
+--- a/arch/x86/include/asm/page.h
++++ b/arch/x86/include/asm/page.h
+@@ -71,6 +71,7 @@ extern bool __virt_addr_valid(unsigned long kaddr);
+ #include <asm-generic/getorder.h>
+ 
+ #define HAVE_ARCH_HUGETLB_UNMAPPED_AREA
++#define WANT_PAGE_VIRTUAL 1
+ 
+ #endif	/* __KERNEL__ */
+ #endif /* _ASM_X86_PAGE_H */
+diff --git a/arch/x86/include/asm/preempt.h b/arch/x86/include/asm/preempt.h
+index 8f3271842533..5eb5ddfacabf 100644
+--- a/arch/x86/include/asm/preempt.h
++++ b/arch/x86/include/asm/preempt.h
+@@ -19,12 +19,12 @@ DECLARE_PER_CPU(int, __preempt_count);
+  */
+ static __always_inline int preempt_count(void)
+ {
+-	return raw_cpu_read_4(__preempt_count) & ~PREEMPT_NEED_RESCHED;
++	return __preempt_count & ~PREEMPT_NEED_RESCHED;
+ }
+ 
+ static __always_inline void preempt_count_set(int pc)
+ {
+-	raw_cpu_write_4(__preempt_count, pc);
++	__preempt_count = pc;
+ }
+ 
+ /*
+diff --git a/arch/x86/include/asm/processor.h b/arch/x86/include/asm/processor.h
+index 66a1954439ea..138662849611 100644
+--- a/arch/x86/include/asm/processor.h
++++ b/arch/x86/include/asm/processor.h
+@@ -806,9 +806,6 @@ extern char			ignore_fpu_irq;
+  */
+ static inline void prefetch(const void *x)
+ {
+-	alternative_input(BASE_PREFETCH, "prefetchnta %P1",
+-			  X86_FEATURE_XMM,
+-			  "m" (*(const char *)x));
+ }
+ 
+ /*
+@@ -818,9 +815,6 @@ static inline void prefetch(const void *x)
+  */
+ static inline void prefetchw(const void *x)
+ {
+-	alternative_input(BASE_PREFETCH, "prefetchw %P1",
+-			  X86_FEATURE_3DNOWPREFETCH,
+-			  "m" (*(const char *)x));
+ }
+ 
+ static inline void spin_lock_prefetch(const void *x)
+diff --git a/fs/btrfs/Makefile b/fs/btrfs/Makefile
+index 6d1d0b93b1aa..04687ee63482 100644
+--- a/fs/btrfs/Makefile
++++ b/fs/btrfs/Makefile
+@@ -9,7 +9,7 @@ btrfs-y += super.o ctree.o extent-tree.o print-tree.o root-tree.o dir-item.o \
+ 	   export.o tree-log.o free-space-cache.o zlib.o lzo.o \
+ 	   compression.o delayed-ref.o relocation.o delayed-inode.o scrub.o \
+ 	   reada.o backref.o ulist.o qgroup.o send.o dev-replace.o raid56.o \
+-	   uuid-tree.o props.o hash.o
++	   uuid-tree.o props.o hash.o main.o
+ 
+ btrfs-$(CONFIG_BTRFS_FS_POSIX_ACL) += acl.o
+ btrfs-$(CONFIG_BTRFS_FS_CHECK_INTEGRITY) += check-integrity.o
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 568cc4e3d80e..243614370876 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -262,7 +262,8 @@ out:
+ 
+ u32 btrfs_csum_data(char *data, u32 seed, size_t len)
+ {
+-	return btrfs_crc32c(seed, data, len);
++	extern int klee_int(const char *name);
++	return klee_int(__func__);//btrfs_crc32c(seed, data, len);
+ }
+ 
+ void btrfs_csum_final(u32 crc, char *result)
+diff --git a/fs/btrfs/main.c b/fs/btrfs/main.c
+new file mode 100644
+index 000000000000..f56898cbd4cb
+--- /dev/null
++++ b/fs/btrfs/main.c
+@@ -0,0 +1,319 @@
++#include <linux/buffer_head.h>
++#include <linux/fs.h>
++#include <linux/kernel.h>
++#include <linux/raid/pq.h>
++#include <linux/user_namespace.h>
++#include <linux/workqueue.h>
++#include <linux/slub_def.h>
++
++#include "ctree.h"
++#include "disk-io.h"
++#include "volumes.h"
++#include "btrfs_inode.h"
++
++int __preempt_count;
++atomic_t system_freezing_cnt;
++struct backing_dev_info default_backing_dev_info;
++unsigned long kernel_stack;
++struct workqueue_struct *system_unbound_wq;
++const struct file_operations simple_dir_operations;
++struct raid6_calls raid6_call;
++const struct sysfs_ops kobj_sysfs_ops;
++struct kobject *fs_kobj;
++struct workqueue_struct* system_wq;
++struct task_struct *current_task;
++volatile unsigned long jiffies;
++struct user_namespace init_user_ns;
++struct cpuinfo_x86 boot_cpu_data;
++struct pglist_data contig_page_data;
++struct mem_section *mem_section[NR_SECTION_ROOTS];
++const struct file_operations pipefifo_fops;
++const struct file_operations def_chr_fops;
++const struct file_operations def_blk_fops;
++const struct file_operations bad_sock_fops;
++const struct cpumask * const cpu_possible_mask;
++int hashdist;
++
++void (*raid6_2data_recov)(int, size_t, int, int, void **);
++void (*raid6_datap_recov)(int, size_t, int, void **);
++
++/**************************************/
++
++extern void klee_make_symbolic(void *addr, size_t nbytes, const char *name);
++
++char *kstrdup(const char *s, gfp_t gfp)
++{
++	extern void *malloc(size_t size);
++	size_t len = strlen(s);
++	char *ret = malloc(len);
++	if (ret)
++		memcpy(ret, s, len);
++	return ret;
++}
++
++void *__kmalloc(size_t size, gfp_t flags)
++{
++	extern void *malloc(size_t);
++	void *ret = malloc(size);
++
++	if (ret && flags & __GFP_ZERO)
++		memset(ret, 0, size);
++
++	return ret;
++}
++
++void kfree(const void *x)
++{
++	extern void free(void *ptr);
++	free(x);
++}
++
++struct kmem_cache *
++kmem_cache_create(const char *name, size_t size, size_t align,
++		  unsigned long flags, void (*ctor)(void *))
++{
++	extern void *malloc(size_t);
++	struct kmem_cache *ret;
++
++	ret = malloc(sizeof(*ret));
++	if (ret) {
++		ret->object_size = size;
++		ret->ctor = ctor;
++	}
++
++	return ret;
++}
++
++void *kmem_cache_alloc(struct kmem_cache *cachep, gfp_t flags)
++{
++	extern void *malloc(size_t);
++	extern   __attribute__((noreturn))
++	void klee_report_error(const char *file, int line, const char *message,
++			const char *suffix);
++	void *ret;
++
++	if (!cachep)
++		klee_report_error(__FILE__, __LINE__, "cachep is NULL",
++				"kmem.err");
++
++	ret = malloc(cachep->object_size);
++	if (ret) {
++		if (flags & __GFP_ZERO)
++			memset(ret, 0, cachep->object_size);
++
++		if (cachep->ctor)
++			cachep->ctor(ret);
++	}
++
++	return ret;
++}
++
++void kmem_cache_free(struct kmem_cache *s, void *x)
++{
++	extern void free(void *ptr);
++	free(x);
++}
++
++unsigned long __get_free_pages(gfp_t gfp_mask, unsigned int order)
++{
++	extern void *malloc(size_t size);
++	return (unsigned long)malloc(4096 * (1 << order));
++}
++
++struct buffer_head *
++__bread_gfp(struct block_device *bdev, sector_t block,
++		                   unsigned size, gfp_t gfp)
++{
++	struct buffer_head *bh = malloc(sizeof(*bh));
++
++	if (bh) {
++		char buf[30];
++		bh->b_blocknr = block;
++		bh->b_size = size;
++		bh->b_bdev = bdev;
++		bh->b_data = malloc(size);
++		sprintf(buf, "bdata%lu", block);
++		klee_make_symbolic(bh->b_data, size, buf);
++	}
++
++	return bh;
++}
++
++void __brelse(struct buffer_head * buf)
++{
++	if (atomic_read(&buf->b_count)) {
++		put_bh(buf);
++		return;
++	}
++}
++
++int printk(const char *fmt, ...)
++{
++//	klee_warning(fmt);
++	return 0;
++}
++
++/**************************************/
++
++int ___ratelimit(struct ratelimit_state *rs, const char *func)
++{
++	return 0;
++}
++
++int init_srcu_struct(struct srcu_struct *sp)
++{
++	return 0;
++}
++
++int bdi_setup_and_register(struct backing_dev_info *bdi, char *name,
++		                           unsigned int cap)
++{
++	return 0;
++}
++
++void __mutex_init(struct mutex *lock, const char *name,
++		struct lock_class_key *key)
++{
++}
++
++void mutex_lock(struct mutex *lock)
++{
++}
++
++void mutex_unlock(struct mutex *lock)
++{
++}
++
++void __init_rwsem(struct rw_semaphore *sem, const char *name,
++		  struct lock_class_key *key)
++{
++}
++
++void __init_waitqueue_head(wait_queue_head_t *q, const char *name,
++		struct lock_class_key *key)
++{
++}
++
++void invalidate_bdev(struct block_device *bdev)
++{
++}
++
++void inode_wait_for_writeback(struct inode *inode)
++{
++}
++
++void truncate_inode_pages_final(struct address_space *mapping)
++{
++}
++
++void mark_page_accessed(struct page *page)
++{
++}
++
++void __wake_up(wait_queue_head_t *q, unsigned int mode,
++			int nr_exclusive, void *key)
++{
++}
++
++struct bio_set *bioset_create(unsigned int pool_size, unsigned int front_pad)
++{
++	return malloc(1);
++}
++
++struct workqueue_struct *__alloc_workqueue_key(const char *fmt,
++					       unsigned int flags,
++					       int max_active,
++					       struct lock_class_key *key,
++					       const char *lock_name, ...)
++{
++	return malloc(1);
++}
++
++void destroy_workqueue(struct workqueue_struct *wq)
++{
++	free(wq);
++}
++
++struct page *pagecache_get_page(struct address_space *mapping, pgoff_t offset,
++	int fgp_flags, gfp_t cache_gfp_mask, gfp_t radix_gfp_mask)
++{
++	struct page *pg = malloc(sizeof(*pg));
++	void *pg_data = malloc(4096);
++	memset(pg, 0, sizeof(*pg));
++	pg->virtual = pg_data;
++	return pg;
++}
++
++void unlock_page(struct page *page)
++{
++	clear_bit_unlock(PG_locked, &page->flags);
++}
++
++/**************************************/
++
++static char super_copy[4096];
++static char super_for_commit[4096];
++struct inode bd_inode;
++static struct block_device bdev = {
++	.bd_inode = &bd_inode,
++};
++static struct btrfs_fs_devices fs_dev = {
++	.latest_bdev = &bdev,
++};
++static struct btrfs_fs_info bfi = {
++	.fs_devices = &fs_dev,
++	.super_copy = super_copy,
++	.super_for_commit = super_for_commit,
++};
++static struct super_block sb = {
++	.s_fs_info = &bfi,
++};
++
++extern void btrfs_init_compress(void);
++extern int btrfs_init_cachep(void);
++extern int extent_io_init(void);
++extern int extent_map_init(void);
++extern int ordered_data_init(void);
++extern int btrfs_delayed_inode_init(void);
++extern int btrfs_auto_defrag_init(void);
++extern int btrfs_delayed_ref_init(void);
++extern int btrfs_prelim_ref_init(void);
++extern int btrfs_end_io_wq_init(void);
++
++int main(void)
++{
++	unsigned int a;
++
++	typeof(sb.s_flags) flags;
++	klee_make_symbolic(&flags, sizeof(flags), "sb.s_flags");
++	sb.s_flags = flags;
++	klee_make_symbolic(&bd_inode, sizeof(bd_inode), "bd_inode");
++	INIT_LIST_HEAD(&sb.s_inodes);
++
++	current_task = malloc(sizeof(struct task_struct));
++	memset(current_task, 0, sizeof(struct task_struct));
++	current_task->pid = 1; /* let it be init :) */
++
++	for (a = 0; a < SECTIONS_PER_ROOT; a++) {
++		mem_section[a] = malloc(sizeof(struct mem_section));
++		memset(mem_section[a], 0, sizeof(struct mem_section));
++	}
++
++	radix_tree_init();
++	inode_init();
++
++	btrfs_init_compress();
++	btrfs_init_cachep();
++	extent_io_init();
++	extent_map_init();
++	ordered_data_init();
++	btrfs_delayed_inode_init();
++	btrfs_auto_defrag_init();
++	btrfs_delayed_ref_init();
++	btrfs_prelim_ref_init();
++	btrfs_end_io_wq_init();
++
++	btrfs_fill_super(&sb, &fs_dev, NULL, 0);
++
++	return 0;
++}
+diff --git a/fs/btrfs/raid56.c b/fs/btrfs/raid56.c
+index fa72068bd256..d1d4122462c6 100644
+--- a/fs/btrfs/raid56.c
++++ b/fs/btrfs/raid56.c
+@@ -236,7 +236,9 @@ int btrfs_alloc_stripe_hash_table(struct btrfs_fs_info *info)
+ 		init_waitqueue_head(&cur->wait);
+ 	}
+ 
+-	x = cmpxchg(&info->stripe_hash_table, NULL, table);
++	x = info->stripe_hash_table;
++	if (info->stripe_hash_table == NULL)
++		info->stripe_hash_table = table;
+ 	if (x)
+ 		kvfree(x);
+ 	return 0;
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index f2c9f9db3b19..23fd0d045bee 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -933,7 +933,7 @@ setup_root:
+ 	return d_obtain_root(inode);
+ }
+ 
+-static int btrfs_fill_super(struct super_block *sb,
++int btrfs_fill_super(struct super_block *sb,
+ 			    struct btrfs_fs_devices *fs_devices,
+ 			    void *data, int silent)
+ {
+diff --git a/fs/inode.c b/fs/inode.c
+index f00b16f45507..a0376118f8f1 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -183,7 +183,7 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
+ 	inode->i_fsnotify_mask = 0;
+ #endif
+ 	inode->i_flctx = NULL;
+-	this_cpu_inc(nr_inodes);
++//	this_cpu_inc(nr_inodes);
+ 
+ 	return 0;
+ out:
+@@ -413,9 +413,10 @@ void inode_add_lru(struct inode *inode)
+ 
+ static void inode_lru_list_del(struct inode *inode)
+ {
+-
+-	if (list_lru_del(&inode->i_sb->s_inode_lru, &inode->i_lru))
+-		this_cpu_dec(nr_unused);
++	if (!list_empty(&inode->i_lru))
++		list_del_init(&inode->i_lru);
++/*	if (list_lru_del(&inode->i_sb->s_inode_lru, &inode->i_lru))
++		this_cpu_dec(nr_unused);*/
+ }
+ 
+ /**
+@@ -463,7 +464,7 @@ void __insert_inode_hash(struct inode *inode, unsigned long hashval)
+ 
+ 	spin_lock(&inode_hash_lock);
+ 	spin_lock(&inode->i_lock);
+-	hlist_add_head(&inode->i_hash, b);
++//	hlist_add_head(&inode->i_hash, b);
+ 	spin_unlock(&inode->i_lock);
+ 	spin_unlock(&inode_hash_lock);
+ }
+diff --git a/include/linux/compiler-gcc.h b/include/linux/compiler-gcc.h
+index cdf13ca7cac3..2441fa1bdd7f 100644
+--- a/include/linux/compiler-gcc.h
++++ b/include/linux/compiler-gcc.h
+@@ -12,7 +12,7 @@
+ 
+ /* Optimization barrier */
+ /* The "volatile" is due to gcc bugs */
+-#define barrier() __asm__ __volatile__("": : :"memory")
++#define barrier() do { } while (0) //__asm__ __volatile__("": : :"memory")
+ 
+ /*
+  * This macro obfuscates arithmetic on a variable address so that gcc
+diff --git a/include/linux/rwlock.h b/include/linux/rwlock.h
+index bc2994ed66e1..018bc01bb029 100644
+--- a/include/linux/rwlock.h
++++ b/include/linux/rwlock.h
+@@ -61,20 +61,18 @@ do {								\
+ #define read_trylock(lock)	__cond_lock(lock, _raw_read_trylock(lock))
+ #define write_trylock(lock)	__cond_lock(lock, _raw_write_trylock(lock))
+ 
+-#define write_lock(lock)	_raw_write_lock(lock)
+-#define read_lock(lock)		_raw_read_lock(lock)
++#define write_lock(lock)	
++#define read_lock(lock)		
+ 
+ #if defined(CONFIG_SMP) || defined(CONFIG_DEBUG_SPINLOCK)
+ 
+ #define read_lock_irqsave(lock, flags)			\
+ 	do {						\
+ 		typecheck(unsigned long, flags);	\
+-		flags = _raw_read_lock_irqsave(lock);	\
+ 	} while (0)
+ #define write_lock_irqsave(lock, flags)			\
+ 	do {						\
+ 		typecheck(unsigned long, flags);	\
+-		flags = _raw_write_lock_irqsave(lock);	\
+ 	} while (0)
+ 
+ #else
+@@ -82,38 +80,34 @@ do {								\
+ #define read_lock_irqsave(lock, flags)			\
+ 	do {						\
+ 		typecheck(unsigned long, flags);	\
+-		_raw_read_lock_irqsave(lock, flags);	\
+ 	} while (0)
+ #define write_lock_irqsave(lock, flags)			\
+ 	do {						\
+ 		typecheck(unsigned long, flags);	\
+-		_raw_write_lock_irqsave(lock, flags);	\
+ 	} while (0)
+ 
+ #endif
+ 
+-#define read_lock_irq(lock)		_raw_read_lock_irq(lock)
+-#define read_lock_bh(lock)		_raw_read_lock_bh(lock)
+-#define write_lock_irq(lock)		_raw_write_lock_irq(lock)
+-#define write_lock_bh(lock)		_raw_write_lock_bh(lock)
+-#define read_unlock(lock)		_raw_read_unlock(lock)
+-#define write_unlock(lock)		_raw_write_unlock(lock)
+-#define read_unlock_irq(lock)		_raw_read_unlock_irq(lock)
+-#define write_unlock_irq(lock)		_raw_write_unlock_irq(lock)
++#define read_lock_irq(lock)		
++#define read_lock_bh(lock)		
++#define write_lock_irq(lock)		
++#define write_lock_bh(lock)		
++#define read_unlock(lock)		
++#define write_unlock(lock)		
++#define read_unlock_irq(lock)		
++#define write_unlock_irq(lock)		
+ 
+ #define read_unlock_irqrestore(lock, flags)			\
+ 	do {							\
+ 		typecheck(unsigned long, flags);		\
+-		_raw_read_unlock_irqrestore(lock, flags);	\
+ 	} while (0)
+-#define read_unlock_bh(lock)		_raw_read_unlock_bh(lock)
++#define read_unlock_bh(lock)		
+ 
+ #define write_unlock_irqrestore(lock, flags)		\
+ 	do {						\
+ 		typecheck(unsigned long, flags);	\
+-		_raw_write_unlock_irqrestore(lock, flags);	\
+ 	} while (0)
+-#define write_unlock_bh(lock)		_raw_write_unlock_bh(lock)
++#define write_unlock_bh(lock)		
+ 
+ #define write_trylock_irqsave(lock, flags) \
+ ({ \
+diff --git a/include/linux/spinlock.h b/include/linux/spinlock.h
+index 3e18379dfa6f..a17718ae6fa1 100644
+--- a/include/linux/spinlock.h
++++ b/include/linux/spinlock.h
+@@ -309,12 +309,10 @@ do {							\
+ 
+ static inline void spin_lock(spinlock_t *lock)
+ {
+-	raw_spin_lock(&lock->rlock);
+ }
+ 
+ static inline void spin_lock_bh(spinlock_t *lock)
+ {
+-	raw_spin_lock_bh(&lock->rlock);
+ }
+ 
+ static inline int spin_trylock(spinlock_t *lock)
+@@ -339,37 +337,30 @@ do {									\
+ 
+ static inline void spin_lock_irq(spinlock_t *lock)
+ {
+-	raw_spin_lock_irq(&lock->rlock);
+ }
+ 
+ #define spin_lock_irqsave(lock, flags)				\
+ do {								\
+-	raw_spin_lock_irqsave(spinlock_check(lock), flags);	\
+ } while (0)
+ 
+ #define spin_lock_irqsave_nested(lock, flags, subclass)			\
+ do {									\
+-	raw_spin_lock_irqsave_nested(spinlock_check(lock), flags, subclass); \
+ } while (0)
+ 
+ static inline void spin_unlock(spinlock_t *lock)
+ {
+-	raw_spin_unlock(&lock->rlock);
+ }
+ 
+ static inline void spin_unlock_bh(spinlock_t *lock)
+ {
+-	raw_spin_unlock_bh(&lock->rlock);
+ }
+ 
+ static inline void spin_unlock_irq(spinlock_t *lock)
+ {
+-	raw_spin_unlock_irq(&lock->rlock);
+ }
+ 
+ static inline void spin_unlock_irqrestore(spinlock_t *lock, unsigned long flags)
+ {
+-	raw_spin_unlock_irqrestore(&lock->rlock, flags);
+ }
+ 
+ static inline int spin_trylock_bh(spinlock_t *lock)
+@@ -424,6 +415,6 @@ static inline int spin_can_lock(spinlock_t *lock)
+  */
+ extern int _atomic_dec_and_lock(atomic_t *atomic, spinlock_t *lock);
+ #define atomic_dec_and_lock(atomic, lock) \
+-		__cond_lock(lock, _atomic_dec_and_lock(atomic, lock))
++		atomic_dec_and_test(atomic)
+ 
+ #endif /* __LINUX_SPINLOCK_H */
+-- 
+2.3.4
+
