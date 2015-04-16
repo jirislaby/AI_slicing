@@ -835,3 +835,32 @@ unsigned long get_seconds(void)
 {
 	return 100;
 }
+
+struct resource;
+typedef unsigned long resource_size_t;
+struct resource *__request_region(struct resource *parent,
+				  resource_size_t start, resource_size_t n,
+				  const char *name)
+{
+	void *ret = malloc(128);
+	klee_make_symbolic(ret, 128, name);
+	return ret;
+}
+
+void __release_region(struct resource *parent, resource_size_t start,
+		                        resource_size_t n)
+{
+}
+
+int sound_alloc_mididev(void)
+{
+	return 0;
+}
+
+typedef int irqreturn_t;
+typedef irqreturn_t (*irq_handler_t)(int, void *);
+int request_irq(unsigned int irq, irq_handler_t handler,
+		unsigned long irqflags, const char *devname, void *dev_id)
+{
+	return 0;
+}
