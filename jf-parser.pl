@@ -2,6 +2,8 @@
 use strict;
 use File::Temp;
 
+my $cc = $ENV{REAL_CC} || 'gcc';
+
 while (<>) {
 	chomp;
 	/^{(.*)},{(.*)},{(.*)},{(.*)}$/ || die "bad input";
@@ -14,7 +16,7 @@ while (<>) {
 #	$filesan =~ s@/@_@g;
 #	my $tmph = File::Temp->new(TEMPLATE => "${filesan}XXXXXXX");
 #	my $tmp = $tmph->filename; # -o $tmp here:
-	$flags = "gcc -E -w $flags $file";
+	$flags = "$cc -E -w $flags $file";
 #	my @args = ("gcc", "-E", "-w", "-o", $tmp->filename);
 #	my $tn = 0;
 #	foreach (split/ /, $flags) {
@@ -35,7 +37,9 @@ while (<>) {
 #	system $flags;
 #	system "cppcheck --enable=all $tmp";
 
-	system "$flags|clang -cc1 -analyze -analyzer-checker experimental.unix.PthreadLock -w";
+	$out =~ s/\.o/.i/;
+	print "$flags -o $out\n";
+	system "$flags -o $out";
 }
 
 1;
