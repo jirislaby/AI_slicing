@@ -1,26 +1,28 @@
-From 3d5d09d1394c7afbb53de386b2c6699dfd525d5b Mon Sep 17 00:00:00 2001
+From 25d4cf9924fcb29023991697713ff868f2d62f16 Mon Sep 17 00:00:00 2001
 From: Jiri Slaby <jslaby@suse.cz>
 Date: Thu, 16 Apr 2015 12:37:35 +0200
 Subject: [PATCH] symbolic execution
 
 ---
  Makefile                         |   2 +-
- arch/x86/include/asm/atomic.h    |  17 ++-
- arch/x86/include/asm/bitops.h    | 171 +++++++++------------
+ arch/x86/include/asm/atomic.h    |  17 +-
+ arch/x86/include/asm/bitops.h    | 202 ++++++++--------
+ arch/x86/include/asm/bug.h       |   5 +-
  arch/x86/include/asm/current.h   |   2 +-
  arch/x86/include/asm/page.h      |   1 +
  arch/x86/include/asm/preempt.h   |   4 +-
  arch/x86/include/asm/processor.h |   6 -
  fs/btrfs/Makefile                |   2 +-
  fs/btrfs/disk-io.c               |   3 +-
- fs/btrfs/main.c                  | 319 +++++++++++++++++++++++++++++++++++++++
+ fs/btrfs/main.c                  | 502 +++++++++++++++++++++++++++++++++++++++
  fs/btrfs/raid56.c                |   4 +-
- fs/btrfs/super.c                 |   2 +-
+ fs/btrfs/super.c                 |   6 +-
+ fs/btrfs/volumes.c               |   6 +-
  fs/inode.c                       |  11 +-
  include/linux/compiler-gcc.h     |   2 +-
- include/linux/rwlock.h           |  30 ++--
+ include/linux/rwlock.h           |  30 +--
  include/linux/spinlock.h         |  11 +-
- 16 files changed, 434 insertions(+), 153 deletions(-)
+ 18 files changed, 653 insertions(+), 163 deletions(-)
  create mode 100644 fs/btrfs/main.c
 
 diff --git a/Makefile b/Makefile
@@ -90,7 +92,7 @@ index 5e5cd123fdfb..6cc8362b2f83 100644
  
  /**
 diff --git a/arch/x86/include/asm/bitops.h b/arch/x86/include/asm/bitops.h
-index bf4c754135ec..88e8e7764596 100644
+index bf4c754135ec..ef6d93f3d2a3 100644
 --- a/arch/x86/include/asm/bitops.h
 +++ b/arch/x86/include/asm/bitops.h
 @@ -56,6 +56,23 @@
@@ -359,6 +361,62 @@ index bf4c754135ec..88e8e7764596 100644
  }
  
  #if 0 /* Fool kernel-doc since it doesn't do macros yet */
+@@ -379,10 +354,33 @@ static int test_bit(int nr, const volatile unsigned long *addr);
+  */
+ static inline unsigned long __ffs(unsigned long word)
+ {
+-	asm("rep; bsf %1,%0"
+-		: "=r" (word)
+-		: "rm" (word));
+-	return word;
++	int num = 0;
++
++#if BITS_PER_LONG == 64
++	if ((word & 0xffffffff) == 0) {
++		num += 32;
++		word >>= 32;
++	}
++#endif
++	if ((word & 0xffff) == 0) {
++		num += 16;
++		word >>= 16;
++	}
++	if ((word & 0xff) == 0) {
++		num += 8;
++		word >>= 8;
++	}
++	if ((word & 0xf) == 0) {
++		num += 4;
++		word >>= 4;
++	}
++	if ((word & 0x3) == 0) {
++		num += 2;
++		word >>= 2;
++	}
++	if ((word & 0x1) == 0)
++		num += 1;
++	return num;
+ }
+ 
+ /**
+diff --git a/arch/x86/include/asm/bug.h b/arch/x86/include/asm/bug.h
+index ba38ebbaced3..06478d83028d 100644
+--- a/arch/x86/include/asm/bug.h
++++ b/arch/x86/include/asm/bug.h
+@@ -25,9 +25,12 @@ do {								\
+ } while (0)
+ 
+ #else
++extern void __assert_fail(const char *__assertion, const char *__file,
++		unsigned int __line, const char *__function)
++		__attribute__ ((__noreturn__));
+ #define BUG()							\
+ do {								\
+-	asm volatile("ud2");					\
++	__assert_fail("BUG", __FILE__, __LINE__, __PRETTY_FUNCTION__); \
+ 	unreachable();						\
+ } while (0)
+ #endif
 diff --git a/arch/x86/include/asm/current.h b/arch/x86/include/asm/current.h
 index 9476c04ee635..89a17a4aedaa 100644
 --- a/arch/x86/include/asm/current.h
@@ -456,10 +514,10 @@ index 568cc4e3d80e..243614370876 100644
  void btrfs_csum_final(u32 crc, char *result)
 diff --git a/fs/btrfs/main.c b/fs/btrfs/main.c
 new file mode 100644
-index 000000000000..f56898cbd4cb
+index 000000000000..48a603cfe3d9
 --- /dev/null
 +++ b/fs/btrfs/main.c
-@@ -0,0 +1,319 @@
+@@ -0,0 +1,502 @@
 +#include <linux/buffer_head.h>
 +#include <linux/fs.h>
 +#include <linux/kernel.h>
@@ -472,6 +530,18 @@ index 000000000000..f56898cbd4cb
 +#include "disk-io.h"
 +#include "volumes.h"
 +#include "btrfs_inode.h"
++
++extern void *malloc(size_t size);
++extern void free(void *ptr);
++
++extern   __attribute__((noreturn))
++void klee_report_error(const char *file, int line, const char *message,
++		const char *suffix);
++extern void klee_warning(const char *message);
++extern int klee_int(const char *name);
++extern void klee_make_symbolic(void *addr, size_t nbytes, const char *name);
++
++/**************************************/
 +
 +int __preempt_count;
 +atomic_t system_freezing_cnt;
@@ -495,17 +565,33 @@ index 000000000000..f56898cbd4cb
 +const struct file_operations bad_sock_fops;
 +const struct cpumask * const cpu_possible_mask;
 +int hashdist;
++struct tss_struct cpu_tss;
++struct backing_dev_info noop_backing_dev_info = {
++	.name           = "noop",
++	.capabilities   = BDI_CAP_NO_ACCT_AND_WRITEBACK,
++};
++int sysctl_vfs_cache_pressure = 100;
++unsigned long phys_base;
 +
 +void (*raid6_2data_recov)(int, size_t, int, int, void **);
 +void (*raid6_datap_recov)(int, size_t, int, void **);
 +
 +/**************************************/
 +
-+extern void klee_make_symbolic(void *addr, size_t nbytes, const char *name);
++size_t strlcpy(char *dest, const char *src, size_t size)
++{
++	size_t ret = strlen(src);
++
++	if (size) {
++		size_t len = (ret >= size) ? size - 1 : ret;
++		memcpy(dest, src, len);
++		dest[len] = '\0';
++	}
++	return ret;
++}
 +
 +char *kstrdup(const char *s, gfp_t gfp)
 +{
-+	extern void *malloc(size_t size);
 +	size_t len = strlen(s);
 +	char *ret = malloc(len);
 +	if (ret)
@@ -515,7 +601,6 @@ index 000000000000..f56898cbd4cb
 +
 +void *__kmalloc(size_t size, gfp_t flags)
 +{
-+	extern void *malloc(size_t);
 +	void *ret = malloc(size);
 +
 +	if (ret && flags & __GFP_ZERO)
@@ -526,15 +611,14 @@ index 000000000000..f56898cbd4cb
 +
 +void kfree(const void *x)
 +{
-+	extern void free(void *ptr);
-+	free(x);
++	void *a = (void *)x;
++	free(a);
 +}
 +
 +struct kmem_cache *
 +kmem_cache_create(const char *name, size_t size, size_t align,
 +		  unsigned long flags, void (*ctor)(void *))
 +{
-+	extern void *malloc(size_t);
 +	struct kmem_cache *ret;
 +
 +	ret = malloc(sizeof(*ret));
@@ -548,10 +632,6 @@ index 000000000000..f56898cbd4cb
 +
 +void *kmem_cache_alloc(struct kmem_cache *cachep, gfp_t flags)
 +{
-+	extern void *malloc(size_t);
-+	extern   __attribute__((noreturn))
-+	void klee_report_error(const char *file, int line, const char *message,
-+			const char *suffix);
 +	void *ret;
 +
 +	if (!cachep)
@@ -572,13 +652,11 @@ index 000000000000..f56898cbd4cb
 +
 +void kmem_cache_free(struct kmem_cache *s, void *x)
 +{
-+	extern void free(void *ptr);
 +	free(x);
 +}
 +
 +unsigned long __get_free_pages(gfp_t gfp_mask, unsigned int order)
 +{
-+	extern void *malloc(size_t size);
 +	return (unsigned long)malloc(4096 * (1 << order));
 +}
 +
@@ -586,8 +664,16 @@ index 000000000000..f56898cbd4cb
 +__bread_gfp(struct block_device *bdev, sector_t block,
 +		                   unsigned size, gfp_t gfp)
 +{
-+	struct buffer_head *bh = malloc(sizeof(*bh));
++	static struct buffer_head *blocks[100];
++	struct buffer_head *bh;
 +
++	if (blocks[block]) {
++		klee_warning("block returned");
++		return blocks[block];
++	}
++	klee_warning("block alloc");
++
++	bh = malloc(sizeof(*bh));
 +	if (bh) {
 +		char buf[30];
 +		bh->b_blocknr = block;
@@ -596,6 +682,7 @@ index 000000000000..f56898cbd4cb
 +		bh->b_data = malloc(size);
 +		sprintf(buf, "bdata%lu", block);
 +		klee_make_symbolic(bh->b_data, size, buf);
++		blocks[block] = bh;
 +	}
 +
 +	return bh;
@@ -615,6 +702,15 @@ index 000000000000..f56898cbd4cb
 +	return 0;
 +}
 +
++void get_filesystem(struct file_system_type *fs)
++{
++}
++
++int register_shrinker(struct shrinker *shrinker)
++{
++	return 0;
++}
++
 +/**************************************/
 +
 +int ___ratelimit(struct ratelimit_state *rs, const char *func)
@@ -627,8 +723,15 @@ index 000000000000..f56898cbd4cb
 +	return 0;
 +}
 +
-+int bdi_setup_and_register(struct backing_dev_info *bdi, char *name,
-+		                           unsigned int cap)
++void call_rcu_sched(struct rcu_head *head, void (*func)(struct rcu_head *rcu))
++{
++}
++
++void wait_rcu_gp(call_rcu_func_t crf)
++{
++}
++
++int bdi_setup_and_register(struct backing_dev_info *bdi, char *name)
 +{
 +	return 0;
 +}
@@ -643,6 +746,14 @@ index 000000000000..f56898cbd4cb
 +}
 +
 +void mutex_unlock(struct mutex *lock)
++{
++}
++
++void down_write(struct rw_semaphore *sem)
++{
++}
++
++void up_write(struct rw_semaphore *sem)
 +{
 +}
 +
@@ -697,7 +808,7 @@ index 000000000000..f56898cbd4cb
 +}
 +
 +struct page *pagecache_get_page(struct address_space *mapping, pgoff_t offset,
-+	int fgp_flags, gfp_t cache_gfp_mask, gfp_t radix_gfp_mask)
++	int fgp_flags, gfp_t gfp_mask)
 +{
 +	struct page *pg = malloc(sizeof(*pg));
 +	void *pg_data = malloc(4096);
@@ -711,25 +822,106 @@ index 000000000000..f56898cbd4cb
 +	clear_bit_unlock(PG_locked, &page->flags);
 +}
 +
-+/**************************************/
++struct block_device *blkdev_get_by_path(const char *path, fmode_t mode,
++					void *holder)
++{
++	static struct inode bd_inode;
++	static struct request_queue queue;
++	static struct gendisk bd_disk = {
++		.queue = &queue,
++	};
++	static struct block_device bdev = {
++		.bd_inode = &bd_inode,
++		.bd_disk = &bd_disk,
++	};
++	klee_make_symbolic(&bd_inode, sizeof(bd_inode), "bd_inode");
++	bd_inode.i_bdev = &bdev;
++	bd_inode.i_mapping = (struct address_space *)&bd_inode;
 +
-+static char super_copy[4096];
-+static char super_for_commit[4096];
-+struct inode bd_inode;
-+static struct block_device bdev = {
-+	.bd_inode = &bd_inode,
-+};
-+static struct btrfs_fs_devices fs_dev = {
-+	.latest_bdev = &bdev,
-+};
-+static struct btrfs_fs_info bfi = {
-+	.fs_devices = &fs_dev,
-+	.super_copy = super_copy,
-+	.super_for_commit = super_for_commit,
-+};
-+static struct super_block sb = {
-+	.s_fs_info = &bfi,
-+};
++	return &bdev;
++}
++
++void blkdev_put(struct block_device *bdev, fmode_t mode)
++{
++}
++
++int bdev_read_only(struct block_device *bdev) 
++{
++	return klee_int(__func__);
++}
++
++const char *bdevname(struct block_device *bdev, char *buf)
++{
++	strcpy(buf, "sdb");
++	return buf;
++}
++
++
++struct page *read_cache_page_gfp(struct address_space *mapping,
++				pgoff_t index,
++				gfp_t gfp)
++{
++	struct page *page = malloc(sizeof(*page));
++	struct inode *inode = (struct inode *)mapping;
++
++	page->virtual = __bread_gfp(inode->i_bdev, index, 4096, 0)->b_data;
++
++	return page;
++}
++
++void put_page(struct page *page)
++{
++	free(page);
++}
++
++int filemap_write_and_wait(struct address_space *mapping)
++{
++	/* TODO */
++	klee_warning("TODO filemap_write_and_wait");
++	return 0;
++}
++
++int filemap_fdatawrite_range(struct address_space *mapping, loff_t start,
++				loff_t end)
++{
++	/* TODO */
++//	klee_warning("TODO filemap_fdatawrite_range");
++	return 0;
++}
++
++int filemap_fdatawait_range(struct address_space *mapping, loff_t start_byte,
++			    loff_t end_byte)
++{
++	/* TODO */
++//	klee_warning("TODO filemap_fdatawait_range");
++	return 0;
++}
++
++void wake_up_bit(void *word, int bit)
++{
++}
++
++int set_blocksize(struct block_device *bdev, int size)
++{
++	/* Size must be a power of two, and between 512 and PAGE_SIZE */
++	if (size > PAGE_SIZE || size < 512 || !is_power_of_2(size))
++		return -EINVAL;
++
++	/* Size cannot be smaller than the size supported by the device */
++//	if (size < bdev_logical_block_size(bdev))
++//		return -EINVAL;
++
++	/* Don't change the size if it is same as current */
++	if (bdev->bd_block_size != size) {
++//		sync_blockdev(bdev);
++		bdev->bd_block_size = size;
++		bdev->bd_inode->i_blkbits = blksize_bits(size);
++//		kill_bdev(bdev);
++	}
++	return 0;
++}
++
++/**************************************/
 +
 +extern void btrfs_init_compress(void);
 +extern int btrfs_init_cachep(void);
@@ -742,15 +934,49 @@ index 000000000000..f56898cbd4cb
 +extern int btrfs_prelim_ref_init(void);
 +extern int btrfs_end_io_wq_init(void);
 +
++extern int device_list_add(const char *path,
++		struct btrfs_super_block *disk_super, u64 devid,
++		struct btrfs_fs_devices **fs_devices_ret);
++
++extern int btrfs_fill_super(struct super_block *sb,
++			    struct btrfs_fs_devices *fs_devices,
++			    void *data, int silent);
++
++
++#if 0
++static char super_copy[4096];
++static char super_for_commit[4096];
++static struct btrfs_fs_info bfi = {
++	.super_copy = (void *)super_copy,
++	.super_for_commit = (void *)super_for_commit,
++};
++static struct super_block sb = {
++	.s_fs_info = &bfi,
++};
++static struct btrfs_super_block *disk_super;
++#endif
++extern struct file_system_type btrfs_fs_type;
++
++//static char data[4096];
++
 +int main(void)
 +{
 +	unsigned int a;
++	int flags;
++#if 0
++	struct btrfs_fs_devices *fs_dev;
++	u64 devid;
++	u64 total_devices;
++	int ret;
 +
 +	typeof(sb.s_flags) flags;
++
 +	klee_make_symbolic(&flags, sizeof(flags), "sb.s_flags");
 +	sb.s_flags = flags;
-+	klee_make_symbolic(&bd_inode, sizeof(bd_inode), "bd_inode");
 +	INIT_LIST_HEAD(&sb.s_inodes);
++#endif
++//	klee_make_symbolic(data, sizeof(data), "data");
++	klee_make_symbolic(&flags, sizeof(flags), "flags");
 +
 +	current_task = malloc(sizeof(struct task_struct));
 +	memset(current_task, 0, sizeof(struct task_struct));
@@ -761,6 +987,7 @@ index 000000000000..f56898cbd4cb
 +		memset(mem_section[a], 0, sizeof(struct mem_section));
 +	}
 +
++	idr_init_cache();
 +	radix_tree_init();
 +	inode_init();
 +
@@ -774,8 +1001,22 @@ index 000000000000..f56898cbd4cb
 +	btrfs_delayed_ref_init();
 +	btrfs_prelim_ref_init();
 +	btrfs_end_io_wq_init();
++#if 0
++	disk_super = __bread_gfp(&bdev, 16, 4096, 0)->b_data;
 +
-+	btrfs_fill_super(&sb, &fs_dev, NULL, 0);
++	devid = btrfs_stack_device_id(&disk_super->dev_item);
++	total_devices = btrfs_super_num_devices(disk_super);
++
++	ret = device_list_add("/dev/sdb", disk_super, devid, &fs_dev);
++	if (!ret)
++		fs_dev->total_devices = total_devices;
++
++	fs_dev->latest_bdev = &bdev;
++	bfi.fs_devices = fs_dev;
++
++	btrfs_fill_super(&sb, fs_dev, NULL, 0);
++#endif
++	btrfs_fs_type.mount(&btrfs_fs_type, flags, "/dev/sdb", NULL); // data
 +
 +	return 0;
 +}
@@ -795,9 +1036,18 @@ index fa72068bd256..d1d4122462c6 100644
  		kvfree(x);
  	return 0;
 diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
-index f2c9f9db3b19..23fd0d045bee 100644
+index f2c9f9db3b19..4662771e89cc 100644
 --- a/fs/btrfs/super.c
 +++ b/fs/btrfs/super.c
+@@ -65,7 +65,7 @@
+ #include <trace/events/btrfs.h>
+ 
+ static const struct super_operations btrfs_super_ops;
+-static struct file_system_type btrfs_fs_type;
++struct file_system_type btrfs_fs_type;
+ 
+ static int btrfs_remount(struct super_block *sb, int *flags, char *data);
+ 
 @@ -933,7 +933,7 @@ setup_root:
  	return d_obtain_root(inode);
  }
@@ -806,6 +1056,39 @@ index f2c9f9db3b19..23fd0d045bee 100644
 +int btrfs_fill_super(struct super_block *sb,
  			    struct btrfs_fs_devices *fs_devices,
  			    void *data, int silent)
+ {
+@@ -1908,7 +1908,7 @@ static void btrfs_kill_super(struct super_block *sb)
+ 	free_fs_info(fs_info);
+ }
+ 
+-static struct file_system_type btrfs_fs_type = {
++struct file_system_type btrfs_fs_type = {
+ 	.owner		= THIS_MODULE,
+ 	.name		= "btrfs",
+ 	.mount		= btrfs_mount,
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index a73acf496e10..002401fed818 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -164,8 +164,8 @@ static noinline struct btrfs_device *__find_device(struct list_head *head,
+ 	struct btrfs_device *dev;
+ 
+ 	list_for_each_entry(dev, head, dev_list) {
+-		if (dev->devid == devid &&
+-		    (!uuid || !memcmp(dev->uuid, uuid, BTRFS_UUID_SIZE))) {
++		if (dev->devid == devid) {/* &&
++		    (!uuid || !memcmp(dev->uuid, uuid, BTRFS_UUID_SIZE))) {*/
+ 			return dev;
+ 		}
+ 	}
+@@ -449,7 +449,7 @@ static void pending_bios_fn(struct btrfs_work *work)
+  * 0   - device already known
+  * < 0 - error
+  */
+-static noinline int device_list_add(const char *path,
++noinline int device_list_add(const char *path,
+ 			   struct btrfs_super_block *disk_super,
+ 			   u64 devid, struct btrfs_fs_devices **fs_devices_ret)
  {
 diff --git a/fs/inode.c b/fs/inode.c
 index f00b16f45507..a0376118f8f1 100644
