@@ -120,6 +120,43 @@ size_t strlen(const char *s)
 	return sc - s;
 }
 
+size_t strnlen(const char *s, size_t count)
+{
+	const char *sc;
+
+	for (sc = s; count-- && *sc != '\0'; ++sc)
+		/* nothing */;
+	return sc - s;
+}
+
+char *strpbrk(const char *cs, const char *ct)
+{
+	const char *sc1, *sc2;
+
+	for (sc1 = cs; *sc1 != '\0'; ++sc1) {
+		for (sc2 = ct; *sc2 != '\0'; ++sc2) {
+			if (*sc1 == *sc2)
+				return (char *)sc1;
+		}
+	}
+	return NULL;
+}
+
+char *strsep(char **s, const char *ct)
+{
+	char *sbegin = *s;
+	char *end;
+
+	if (sbegin == NULL)
+		return NULL;
+
+	end = strpbrk(sbegin, ct);
+	if (end)
+		*end++ = '\0';
+	*s = end;
+	return sbegin;
+}
+
 int strcmp(const char *cs, const char *ct)
 {
 	signed char __res;
@@ -194,6 +231,14 @@ char *strcat(char *dest, const char *src)
 	while ((*dest++ = *src++) != '\0')
 		;
 	return tmp;
+}
+
+char *strreplace(char *s, char old, char new)
+{
+	for (; *s; ++s)
+		if (*s == old)
+			*s = new;
+	return s;
 }
 
 unsigned long long simple_strtoull(const char *cp, char **endp,
@@ -736,7 +781,29 @@ void vfree(const void *addr)
 void *__kmalloc(size_t size, gfp_t flags)
 {
 	extern void *malloc(size_t size);
-	return malloc(size);
+	extern void *memset(void *s, int c, size_t count);
+
+	void *ret = malloc(size);
+	if (ret && flags & 0x8000)
+		memset(ret, 0, size);
+	return ret;
+}
+
+void kfree(const void *x)
+{
+	extern void free (void *__ptr);
+	void *a = (void *)x;
+	free(a);
+}
+
+void *kvmalloc_node(size_t size, gfp_t flags, int node)
+{
+	return __kmalloc(size, flags);
+}
+
+void kvfree(const void *addr)
+{
+	kfree(addr);
 }
 
 unsigned long __get_free_pages(gfp_t gfp_mask, unsigned int order)
@@ -748,11 +815,32 @@ unsigned long __get_free_pages(gfp_t gfp_mask, unsigned int order)
 char *kstrdup(const char *s, gfp_t gfp)
 {
 	extern void *malloc(size_t size);
+
+	if (!s)
+		return NULL;
+
 	size_t len = strlen(s);
 	char *ret = malloc(len);
 	if (ret)
 		memcpy(ret, s, len);
 	return ret;
+}
+
+char *kstrndup(const char *s, size_t max, gfp_t gfp)
+{
+	size_t len;
+	char *buf;
+
+	if (!s)
+		return NULL;
+
+	len = strnlen(s, max);
+	buf = malloc(len+1);
+	if (buf) {
+		memcpy(buf, s, len);
+		buf[len] = '\0';
+	}
+	return buf;
 }
 
 int kthread_should_stop(void)
@@ -848,7 +936,7 @@ struct resource *__request_region(struct resource *parent,
 }
 
 void __release_region(struct resource *parent, resource_size_t start,
-		                        resource_size_t n)
+		resource_size_t n)
 {
 }
 
@@ -862,5 +950,28 @@ typedef irqreturn_t (*irq_handler_t)(int, void *);
 int request_irq(unsigned int irq, irq_handler_t handler,
 		unsigned long irqflags, const char *devname, void *dev_id)
 {
+	return 0;
+}
+
+struct ratelimit_state;
+
+int ___ratelimit(struct ratelimit_state *rs, const char *func)
+{
+	return 0;
+}
+
+struct mutex;
+
+void mutex_lock(struct mutex *lock)
+{
+}
+
+void mutex_unlock(struct mutex *lock)
+{
+}
+
+int printk(const char *fmt, ...)
+{
+	//klee_warning(fmt);
 	return 0;
 }
