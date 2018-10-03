@@ -1,0 +1,30 @@
+MAKEFLAGS += --no-builtin-rules
+DIR ?= .
+SOURCES = $(shell find "$(DIR)" -type f -name '*.i')
+OBJS = $(patsubst %.i, %.bc, $(SOURCES))
+LIB ?= library.c
+CLANG=clang
+OPTNONE=-O0 -Xclang -disable-O0-optnone
+CFLAGS=-g -nostdinc -emit-llvm $(OPTNONE)
+
+all:
+	$(MAKE) -f Makefile CC=$(CLANG) EXTRA_CFLAGS=-D__BPF_TRACING__ $(SOURCES)
+	$(MAKE) linked.bc
+
+linked.bc: library.bc $(OBJS)
+	llvm-link -o $@ $^
+
+library.bc: $(LIB)
+	$(CLANG) $(CFLAGS) -c -o $@ $^
+
+%.bc: %.c
+	@echo "$^ -> $@"
+
+%.bc: %.i
+	$(CLANG) -w $(CFLAGS) -c -o $@ $^
+
+debug:
+	@echo LIB=$(LIB)
+	@echo DIR=$(DIR)
+	@echo SOURCES=$(SOURCES)
+	@echo OBJS=$(OBJS)
