@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 DIR=.
 if [ $# -gt 0 ]; then

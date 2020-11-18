@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 MAKE_OPT="$1"
 shift
@@ -6,7 +6,7 @@ shift
 BLD_SCRIPT=/tmp/xxx #`mktemp`
 echo "using $BLD_SCRIPT"
 cat >$BLD_SCRIPT <<EOF
-#!/bin/bash
+#!/usr/bin/bash
 
 echo invoked \${#@}
 MAK="make -k $MAKE_OPT \`echo \$@|sed 's/\.c\>/.i/g'\`"

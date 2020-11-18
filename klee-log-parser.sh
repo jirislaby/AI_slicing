@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 if [ $# -eq 0 ]; then
 	FILES=`find -type f -name *.log `

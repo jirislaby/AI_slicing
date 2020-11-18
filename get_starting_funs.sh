@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 while read FILE FUN; do
 	test -f "$FILE" || continue

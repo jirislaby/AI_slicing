@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 SCRIPTS_PATH=`dirname $0`
 LINUX_SOURCES=/l/latest/tmp/linux1
